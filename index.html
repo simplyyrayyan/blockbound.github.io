@@ -3,84 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#edf0e8" />
+    <meta name="theme-color" content="#323638" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Blockbound — Your little wilderness</title>
-    <meta name="description" content="Explore, mine, craft, and make yourself at home in a little voxel wilderness. A browser game with local saves." />
+    <title>Blockbound - Wildlife Update</title>
+    <meta name="description" content="A playable voxel wilderness with crafting, wildlife, combat, and locally saved worlds." />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <canvas id="game-canvas" aria-label="3D voxel world"></canvas>
-    <div id="webgl-error" class="hidden"><h1>A 3D world needs WebGL.</h1><p>Enable hardware acceleration in your browser, then reload to play.</p></div>
+    <div id="webgl-error" class="hidden"><h1>WebGL unavailable</h1><p>Enable hardware acceleration, then reload.</p></div>
     <main id="app">
       <section id="home-screen" class="screen active">
         <div class="home-shade"></div>
         <div class="home-shell">
-          <header class="brand-row">
-            <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-            <div class="brand-wordmark">BLOCK<span>BOUND</span></div>
-            <span class="build-tag">A LITTLE WILDERNESS</span>
-            <button id="home-help" class="home-help">How to play <span>↗</span></button>
-          </header>
+          <header class="brand-row"><span>BLOCKBOUND</span><button id="home-help" class="icon-btn" title="Field journal" aria-label="Field journal"><i data-lucide="book-open"></i></button></header>
           <div class="home-content">
-            <div class="hero-copy">
-              <p class="eyebrow"><span class="tiny-dot"></span> THE WORLD IS WHAT YOU MAKE IT</p>
-              <h1>A little world.<br /><em>A big adventure.</em></h1>
-              <p class="hero-sub">Wander a little. Dig a little deeper.<br />Build something that feels like home.</p>
-            </div>
+            <div class="hero-copy"><h1>BLOCKBOUND</h1><p class="edition">WILDLIFE UPDATE</p></div>
             <div class="start-panel">
-              <div class="seed-heading"><label for="seed-input">YOUR WORLD SEED</label><span>Same seed, same wilderness</span></div>
-              <div class="seed-row"><input id="seed-input" value="cedar-valley" type="text" maxlength="36" autocomplete="off" spellcheck="false" /><button id="random-seed" class="icon-btn" title="Randomize seed" aria-label="Randomize seed">⤨</button></div>
-              <div class="mode-row" aria-label="Game mode">
-                <button class="mode-card selected" data-mode="survival" aria-pressed="true"><span class="mode-icon">✦</span><span><strong>Survival</strong><small>Gather. Craft. Grow.</small></span><i>✓</i></button>
-                <button class="mode-card" data-mode="creative" aria-pressed="false"><span class="mode-icon">◇</span><span><strong>Creative</strong><small>Just you and your ideas.</small></span><i>✓</i></button>
-              </div>
-              <button id="play-btn" class="play-btn"><span>CREATE A WORLD</span><b>→</b></button>
-              <div id="saved-worlds" class="hidden"><div class="saved-select-row"><label for="world-select">PICK UP WHERE YOU LEFT OFF</label><select id="world-select" aria-label="Saved worlds"></select></div><button id="continue-btn" class="continue-btn">Continue your adventure <span>↗</span></button></div>
+              <label class="seed-heading" for="seed-input">World seed</label>
+              <div class="seed-row"><input id="seed-input" value="cedar-valley" type="text" maxlength="36" autocomplete="off" spellcheck="false" /><button id="random-seed" class="icon-btn" title="Randomize seed" aria-label="Randomize seed"><i data-lucide="shuffle"></i></button></div>
+              <div class="mode-row" aria-label="Game mode"><button class="mode-card selected" data-mode="survival" aria-pressed="true"><i data-lucide="pickaxe"></i>Survival</button><button class="mode-card" data-mode="creative" aria-pressed="false"><i data-lucide="blocks"></i>Creative</button></div>
+              <button id="play-btn" class="play-btn"><span>CREATE A WORLD</span><i data-lucide="arrow-right"></i></button>
+              <div id="saved-worlds" class="hidden"><label for="world-select">Saved worlds</label><select id="world-select" aria-label="Saved worlds"></select><button id="continue-btn" class="continue-btn">Continue your adventure <i data-lucide="play"></i></button></div>
             </div>
           </div>
-          <footer class="home-footer"><span><i></i> MADE FOR GETTING A LITTLE LOST</span><span>NO SIGN-IN. JUST PLAY.</span></footer>
+          <footer class="home-footer"><span>BLOCKBOUND / WILDLIFE</span><span>LOCAL WORLDS</span></footer>
         </div>
-        <div class="landscape-caption"><span class="compass-icon">✧</span><div><p>YOURS TO DISCOVER</p><strong>Beyond the next block.</strong><span>Forests, quiet rivers, and a world beneath your feet.</span></div></div>
       </section>
-
       <section id="game-screen" class="screen" aria-label="Blockbound game">
         <div class="vignette"></div><div id="water-overlay"></div><div id="damage-overlay"></div>
-        <div class="game-topbar">
-          <div class="world-ident"><div class="mini-mark"><span></span><span></span><span></span><span></span></div><div><strong id="world-title">CEDAR VALLEY</strong><small id="world-seed-label">SURVIVAL · LOCAL WORLD</small></div></div>
-          <div class="top-status"><span class="day-dot"></span><span id="time-label">DAY 01 · 08:40</span><span class="status-divider"></span><span id="coords-label">48 / 19 / 48</span></div>
-          <span id="save-status" class="save-status">Saved locally</span><button id="pause-btn" class="pause-btn" title="Pause world" aria-label="Pause game"><span></span><span></span></button>
-        </div>
-        <div id="quest" class="quest"><span class="quest-number">01</span><div><small>A LITTLE DIRECTION</small><strong id="quest-title">Make yourself at home</strong><p id="quest-detail">Open your backpack with E to craft oak planks.</p></div><button id="hide-quest" aria-label="Hide guide" title="Hide guide">×</button></div>
+        <div class="game-topbar"><div class="world-ident"><strong id="world-title">CEDAR VALLEY</strong><small id="world-seed-label">SURVIVAL</small></div><div class="top-status"><span id="time-label"></span><span id="coords-label"></span><span id="mob-count"></span></div><span id="save-status" class="save-status">Saved locally</span><button id="pause-btn" class="icon-btn" title="Pause world" aria-label="Pause game"><i data-lucide="pause"></i></button></div>
+        <div id="boss-bar" class="boss-bar hidden"><strong id="boss-name"></strong><div><i id="boss-health"></i></div></div>
+        <div id="quest" class="quest"><span class="quest-number">01</span><div><small>ADVANCEMENT</small><strong id="quest-title"></strong><p id="quest-detail" class="hidden"></p></div><button id="hide-quest" title="Hide advancement" aria-label="Hide guide"><i data-lucide="x"></i></button></div>
         <div class="crosshair" aria-hidden="true"><span></span><span></span></div>
         <div id="target-label" class="target-label"></div><div id="mine-progress" class="mine-progress"><i></i></div>
-        <div id="capture-hint" class="capture-hint hidden">Click the world to look around <span>or drag to look · arrows also turn</span></div>
-        <div class="left-help"><span class="keycap">WASD</span> MOVE <span class="keycap">SPACE</span> JUMP <span class="keycap">SHIFT</span> SPRINT</div>
-        <div class="right-help"><span class="keycap">HOLD LMB</span> MINE <span class="keycap">RMB</span> PLACE <span class="keycap">E</span> BACKPACK</div>
-        <div id="selected-label" class="selected-label">Wooden pickaxe</div>
+        <div id="capture-hint" class="hidden"></div><div id="effect-list" class="effect-list"></div><div id="selected-label" class="selected-label"></div>
         <div class="hud-bottom">
-          <div class="vitals"><div class="vital-line"><span class="vital-icon heart">♥</span><div class="bar"><i id="health-bar"></i></div><strong id="health-value">20</strong></div><div class="vital-line"><span class="vital-icon food">◆</span><div class="bar food-bar"><i id="food-bar"></i></div><strong id="food-value">20</strong></div></div>
-          <div id="hotbar" class="hotbar" aria-label="Hotbar"></div>
+          <div class="vitals"><div id="armor-icons" class="pixel-icons"></div><div class="survival-icons"><div id="heart-icons" class="pixel-icons"></div><div id="hunger-icons" class="pixel-icons"></div></div></div>
           <div class="level"><span id="mode-label">EXPLORER</span><strong id="level-value">1</strong><div class="level-bar"><i id="xp-bar"></i></div></div>
+          <div id="hotbar" class="hotbar" aria-label="Hotbar"></div>
+          <div class="hidden"><i id="health-bar"></i><i id="food-bar"></i><span id="health-value"></span><span id="food-value"></span></div>
         </div>
-        <div id="touch-controls" class="touch-controls"><div class="dpad"><button data-key="KeyW" aria-label="Move forward">↑</button><button data-key="KeyA" aria-label="Move left">←</button><button data-key="KeyS" aria-label="Move backward">↓</button><button data-key="KeyD" aria-label="Move right">→</button></div><div class="touch-actions"><button id="touch-inventory" aria-label="Open inventory">▦</button><button data-key="Space" aria-label="Jump">↟</button><button id="touch-place">PLACE</button><button id="touch-mine">MINE</button></div></div>
+        <div id="touch-controls" class="touch-controls"><div class="dpad"><button data-key="KeyW" title="Forward" aria-label="Move forward"><i data-lucide="arrow-up"></i></button><button data-key="KeyA" title="Left" aria-label="Move left"><i data-lucide="arrow-left"></i></button><button data-key="KeyS" title="Back" aria-label="Move backward"><i data-lucide="arrow-down"></i></button><button data-key="KeyD" title="Right" aria-label="Move right"><i data-lucide="arrow-right"></i></button></div><div class="touch-actions"><button id="touch-inventory" title="Inventory" aria-label="Open inventory"><i data-lucide="backpack"></i></button><button data-key="Space" title="Jump" aria-label="Jump"><i data-lucide="arrow-up-from-line"></i></button><button id="touch-place" title="Use item" aria-label="Use item"><i data-lucide="hand"></i></button><button id="touch-mine" title="Mine or attack" aria-label="Mine or attack"><i data-lucide="pickaxe"></i></button></div></div>
       </section>
-
       <div id="inventory-modal" class="modal-backdrop hidden">
         <section class="inventory-window" role="dialog" aria-modal="true" aria-label="Inventory and crafting">
-          <header class="inventory-header"><div><p class="eyebrow">A PLACE FOR EVERY LITTLE FIND</p><h2>Your backpack<span id="inventory-mode">SURVIVAL</span></h2></div><button id="close-inventory" class="close-btn" aria-label="Close inventory">×</button></header>
+          <header class="inventory-header"><h2>Inventory <span id="inventory-mode">SURVIVAL</span></h2><button id="close-inventory" class="icon-btn" title="Close inventory" aria-label="Close inventory"><i data-lucide="x"></i></button></header>
           <div class="inventory-body">
-            <div class="inventory-column"><div class="section-title">SUPPLIES <span id="item-count">4 / 36 SLOTS</span></div><div id="inventory-grid" class="inventory-grid"></div><p id="slot-help" class="slot-help">Select a stack, then a slot to move it. Shift-click to move it to your hotbar.</p><div id="creative-palette" class="hidden"><div class="section-title">CREATIVE COLLECTION <span>CLICK TO ADD</span></div><div id="palette-grid"></div></div></div>
-            <div class="craft-column"><div class="section-title">THE WORKBENCH <span id="table-status">HAND CRAFTING</span></div><div class="recipe-heading"><h3 id="recipe-name">Oak planks</h3><span id="recipe-yield">×4</span></div><div class="craft-layout"><div id="craft-grid" class="craft-grid"></div><span class="craft-arrow">→</span><div id="craft-output" class="craft-output"></div></div><p id="recipe-note"></p><div id="recipe-ingredients"></div><button id="craft-button" class="craft-button">Craft oak planks <span>+</span></button><div class="recipe-list-label">RECIPE BOOK <span id="recipe-count"></span></div><div id="recipe-list" class="recipe-list"></div></div>
+            <div class="inventory-column"><div class="equipment-row"><div id="equipment-grid"></div><div class="inventory-tools"><button id="equip-item" class="icon-btn" title="Equip selected item" aria-label="Equip selected item"><i data-lucide="shirt"></i></button><button id="drop-item" class="icon-btn" title="Drop selected stack" aria-label="Drop selected stack"><i data-lucide="arrow-down-to-line"></i></button></div></div><div class="section-title">BACKPACK <span id="item-count"></span></div><div id="inventory-grid" class="inventory-grid"></div><p id="slot-help" class="slot-help"></p>
+              <div id="creative-palette" class="hidden"><div class="section-title">COLLECTION <span id="palette-count"></span></div><div class="catalog-controls"><input id="item-search" type="search" placeholder="Search items or mobs" aria-label="Search items or mobs" autocomplete="off" /><div class="catalog-tabs" role="tablist" aria-label="Item category"><button class="selected" data-category="all" role="tab" aria-selected="true" title="All items" aria-label="All items"><i data-lucide="grid-3x3"></i></button><button data-category="blocks" role="tab" aria-selected="false" title="Blocks" aria-label="Blocks"><i data-lucide="blocks"></i></button><button data-category="mobs" role="tab" aria-selected="false" title="Mobs" aria-label="Mobs"><i data-lucide="paw-print"></i></button><button data-category="combat" role="tab" aria-selected="false" title="Combat" aria-label="Combat"><i data-lucide="swords"></i></button><button data-category="tools" role="tab" aria-selected="false" title="Tools" aria-label="Tools"><i data-lucide="pickaxe"></i></button><button data-category="food" role="tab" aria-selected="false" title="Food" aria-label="Food"><i data-lucide="apple"></i></button><button data-category="materials" role="tab" aria-selected="false" title="Materials" aria-label="Materials"><i data-lucide="gem"></i></button><button data-category="nature" role="tab" aria-selected="false" title="Nature" aria-label="Nature"><i data-lucide="sprout"></i></button></div></div><div id="palette-grid"></div><div class="palette-footer"><button id="palette-prev" class="icon-btn" title="Previous page" aria-label="Previous item page"><i data-lucide="chevron-left"></i></button><span id="palette-page"></span><button id="palette-next" class="icon-btn" title="Next page" aria-label="Next item page"><i data-lucide="chevron-right"></i></button></div></div>
+            </div>
+            <div class="craft-column"><div class="section-title">CRAFTING <span id="table-status"></span></div><div class="recipe-heading"><h3 id="recipe-name"></h3><span id="recipe-yield"></span></div><div class="craft-layout"><div id="craft-grid" class="craft-grid"></div><i data-lucide="arrow-right"></i><div id="craft-output" class="craft-output"></div></div><p id="recipe-note" class="hidden"></p><div id="recipe-ingredients"></div><button id="craft-button" class="craft-button">Craft</button><div class="section-title">RECIPE BOOK <span id="recipe-count"></span></div><input id="recipe-search" type="search" placeholder="Search recipes" aria-label="Search recipes" autocomplete="off" /><div id="recipe-list" class="recipe-list"></div></div>
           </div>
-          <footer class="inventory-footer"><span><span class="keycap">CLICK</span> move stack</span><span><span class="keycap">1–9</span> assign to hotbar</span><span><span class="keycap">E</span> return to world</span></footer>
         </section>
       </div>
-
-      <div id="pause-modal" class="modal-backdrop hidden"><section class="pause-window" role="dialog" aria-modal="true" aria-label="Pause menu"><p class="eyebrow">A MOMENT IN THE WILDERNESS</p><h2>Take a breath.</h2><p>Your little corner of the world will be here.</p><button id="resume-btn" class="play-btn"><span>BACK TO THE ADVENTURE</span><b>→</b></button><button id="save-btn" class="menu-button">Save world <span>↓</span></button><button id="help-btn" class="menu-button">Field guide & controls <span>↗</span></button><button id="sound-btn" class="menu-button">Sound <span>ON</span></button><button id="respawn-btn" class="menu-button">Return to starting clearing <span>⌂</span></button><button id="leave-btn" class="text-btn">Save & return home</button></section></div>
-
-      <div id="help-modal" class="modal-backdrop hidden"><section class="help-window" role="dialog" aria-modal="true" aria-label="Field guide"><header><div><p class="eyebrow">YOUR POCKET FIELD GUIDE</p><h2>Every adventure starts small.</h2></div><button id="close-help" class="close-btn" aria-label="Close field guide">×</button></header><div class="guide-columns"><div><h3>Find your feet</h3><p><kbd>W A S D</kbd> Walk · <kbd>Space</kbd> Jump<br /><kbd>Shift</kbd> Sprint · <kbd>Mouse</kbd> Look<br /><kbd>Arrow keys</kbd> Look without mouse lock<br /><kbd>E</kbd> Backpack · <kbd>Esc</kbd> Pause<br /><kbd>1–9</kbd> / scroll Select hotbar slot</p><h3>Make your mark</h3><p>Hold left click to mine. Right click to place a block on the face you're aiming at. Right click a crafting table to use it. Right click with an apple to eat.</p><p>On touchscreens, drag to look and use the movement, mining, and building buttons. Landscape gives you more room.</p></div><div><h3>From wood to diamonds</h3><ol><li>Logs → planks → sticks and a crafting table.</li><li>Use your wooden pickaxe to collect stone and coal.</li><li>Place a crafting table. Craft a stone pickaxe nearby to mine iron.</li><li>An iron pickaxe unlocks gold and diamonds. Look below Y 12 for gold and Y 9 for diamonds.</li><li>Craft torches for caves, bricks for building, and glass for a view.</li></ol><p class="guide-note">A few small-world rules: ore drops ready-to-use metal, water stays still, and trees keep their shape. Creative gives you unlimited blocks and flight: <kbd>F</kbd> toggle, <kbd>Space</kbd> up, <kbd>Shift</kbd> down.</p></div></div><footer>Worlds save in this browser every 20 seconds, when paused, and when you leave. Your seed always generates the same terrain.</footer></section></div>
-      <div id="loading" class="loading hidden"><div class="loading-mark">✦</div><p>Growing your little wilderness…</p><span>TREES, CAVES, AND POSSIBILITIES</span></div>
+      <div id="trade-modal" class="modal-backdrop hidden"><section class="trade-window" role="dialog" aria-modal="true" aria-label="Trading"><header><h2 id="trader-name">Villager</h2><button id="close-trade" class="icon-btn" title="Close trading" aria-label="Close trading"><i data-lucide="x"></i></button></header><p id="trade-balance"></p><div id="trade-list"></div></section></div>
+      <div id="pause-modal" class="modal-backdrop hidden"><section class="pause-window" role="dialog" aria-modal="true" aria-label="Pause menu"><h2>Game paused</h2><button id="resume-btn" class="play-btn"><span>Resume game</span><i data-lucide="play"></i></button><button id="save-btn" class="menu-button">Save world <i data-lucide="save"></i></button><button id="help-btn" class="menu-button">Field journal <i data-lucide="book-open"></i></button><button id="sound-btn" class="menu-button">Sound <span>ON</span></button><button id="respawn-btn" class="menu-button">Return to spawn <i data-lucide="house"></i></button><button id="leave-btn" class="menu-button">Save & return home <i data-lucide="log-out"></i></button></section></div>
+      <div id="help-modal" class="modal-backdrop hidden"><section class="help-window" role="dialog" aria-modal="true" aria-label="Field guide"><header><h2>Field journal</h2><button id="close-help" class="icon-btn" title="Close journal" aria-label="Close field guide"><i data-lucide="x"></i></button></header><div id="bestiary-list"></div></section></div>
+      <div id="loading" class="loading hidden"><div class="loading-block"></div><p>Building terrain...</p></div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </main>
     <script type="module" src="/game.js"></script>

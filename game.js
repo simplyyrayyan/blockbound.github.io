@@ -1,15 +1,21 @@
 import * as THREE from 'three';
-import '@fontsource-variable/space-grotesk';
 import '@fontsource/dm-mono/400.css';
 import '@fontsource/dm-mono/500.css';
+import '@fontsource/vt323';
+import { createIcons, BookOpen, Shuffle, Pickaxe, Blocks, ArrowRight, Play, Pause, X, ArrowUp, ArrowDown, ArrowLeft, ArrowUpFromLine, Backpack, Hand, Shirt, ArrowDownToLine, Grid3x3, PawPrint, Swords, Apple, Gem, Sprout, ChevronLeft, ChevronRight, Save, House, LogOut, HardHat, Columns2, Footprints, Shield } from 'lucide';
 import { B, BLOCKS, ITEMS, RECIPES } from './src/catalog.js';
 import { World, SIZE, HEIGHT, clamp, raycast, collides } from './src/world.js';
 import { Inventory } from './src/inventory.js';
 import { miningInfo, mineBlock, placeBlock } from './src/rules.js';
 import { VoxelRenderer } from './src/render.js';
 import { SAVE_PREFIX, encodeSave, decodeSave } from './src/save.js';
+import { MobSystem } from './src/mobs.js';
+import { MOBS, MOB_LIST, TRADES } from './src/mob-catalog.js';
+import { useItem, attackMob, updateEffects, hitPlayer, defense, equip, unequip, dropStack } from './src/actions.js';
+import { itemIcon } from './src/item-art.js';
 
 const $ = selector => document.querySelector(selector);
+const icons = { BookOpen, Shuffle, Pickaxe, Blocks, ArrowRight, Play, Pause, X, ArrowUp, ArrowDown, ArrowLeft, ArrowUpFromLine, Backpack, Hand, Shirt, ArrowDownToLine, Grid3x3, PawPrint, Swords, Apple, Gem, Sprout, ChevronLeft, ChevronRight, Save, House, LogOut, HardHat, Columns2, Footprints, Shield };
 const canvas = $('#game-canvas');
 let view;
 try { view = new VoxelRenderer(canvas); }
@@ -18,9 +24,10 @@ let state = null, overlay = 'home', helpReturn = 'home', selectedMode = 'surviva
 let selectedRecipe = 0, carriedSlot = null, target = null, mining = null, mineHeld = false;
 let lastTime = 0, uiTimer = 0, saveTimer = 0, soundEnabled = true, swing = 0, footstepTime = 0;
 let toastTimer = 0, lastWarning = '', warningTime = 0, pointerDrag = null;
+let mobTarget = null, paletteCategory = 'all', palettePage = 0, activeTrader = null;
+let needsRender = true, lastMenuFrame = 0;
 const keys = new Set(), direction = new THREE.Vector3();
 const touch = matchMedia('(pointer: coarse)').matches;
-const iconCache = new Map();
 let audio;
 
 function tone(kind) {
@@ -53,27 +60,7 @@ function warn(message) {
 }
 
 function icon(id) {
-  if (iconCache.has(id)) return iconCache.get(id);
-  const def = ITEMS[id]; if (!def) return '';
-  const c = def.color, light = new THREE.Color(c).offsetHSL(0, 0, .12).getStyle(), dark = new THREE.Color(c).offsetHSL(0, 0, -.17).getStyle();
-  let drawing;
-  if (def.tool) {
-    drawing = '<path d="M10 31h5v-5h5v-5h5v-5h-5v5h-5v5h-5z" fill="#765239"/><path d="M12 29h3v-4h4v-4h3v-3h-4v5h-4z" fill="#bc905c"/>';
-    drawing += def.tool === 'pick' ? `<path d="M8 10V6h15v4h5v5h5v10h-5v-7h-5v-5h-8v-3z" fill="${dark}"/><path d="M8 6h16v4h5v5h4v5h-5v-5h-5v-5H8z" fill="${c}"/><path d="M9 6h14v2H9z" fill="${light}"/>` : def.tool === 'axe' ? `<path d="M10 7h12v5h6v10H16v-5h-6z" fill="${c}"/><path d="M10 7h12v3H10z" fill="${light}"/>` : `<path d="M19 5h10v5h5v9h-5v5H19v-5h-5v-9h5z" fill="${c}"/><path d="M19 7h10v3H19z" fill="${light}"/>`;
-  } else if (def.shape === 'stick') drawing = '<path d="M9 30h5v-5h5v-5h5v-5h5V7h-5v5h-5v5h-5v5H9z" fill="#775239"/><path d="M12 28h3v-5h5v-5h5v-5h3V8h-3v5h-5v5h-5v5h-3z" fill="#bd915e"/>';
-  else if (def.shape === 'apple') drawing = '<path d="M18 5h4v8h-4z" fill="#745538"/><path d="M22 6h8v4h-8z" fill="#749a4c"/><path d="M8 14h5v-3h6v3h4v-3h6v3h4v14h-5v5H13v-5H8z" fill="#ce6549"/><path d="M11 16h5v7h-5z" fill="#f39e79"/><path d="M29 18h4v10h-5v5H16v-3h13z" fill="#b44f3f"/>';
-  else if (def.shape === 'gem') drawing = `<path d="M12 8h17l7 11-14 17L5 20z" fill="${dark}"/><path d="M12 8h17l-6 11H5z" fill="${light}"/><path d="M23 19h13L22 36z" fill="${c}"/>`;
-  else if (def.shape === 'ingot') drawing = `<path d="m7 19 7-10h19l4 10-8 10H7z" fill="${dark}"/><path d="m7 19 7-10h19l-7 10z" fill="${light}"/><path d="M7 19h19v10H7z" fill="${c}"/>`;
-  else if (id === 'torch') drawing = '<path d="M18 17h6v20h-6z" fill="#856340"/><path d="M15 6h12v13H15z" fill="#eaa44f"/><path d="M18 4h6v11h-6z" fill="#fff0a3"/>';
-  else {
-    drawing = `<path d="m20 3 16 9-16 9L4 12z" fill="${light}"/><path d="M4 12l16 9v18L4 30z" fill="${c}"/><path d="m20 21 16-9v18l-16 9z" fill="${dark}"/>`;
-    if (id === 'grass') drawing += '<path d="M4 17l16 9v13L4 30z" fill="#9b714e"/><path d="m20 26 16-9v13l-16 9z" fill="#775135"/>';
-    if (id === 'log' || id === 'planks' || id === 'table' || id === 'brick') drawing += `<path d="m8 15 0 15m6-12v16m10-14v14m7-18v14M4 22l16 9 16-9" fill="none" stroke="${dark}" stroke-width="1.5" opacity=".5"/>`;
-    if (id === 'table') drawing += '<path d="m12 7 16 10m-8-14v18M4 12l16 9 16-9" stroke="#745133" stroke-width="1.5" fill="none"/>';
-    if (id === 'glass') drawing += '<path d="m9 20 7 4m-7 0 4 2m11 4 8-4" fill="none" stroke="#e6f6f0" stroke-width="2"/>';
-  }
-  const svg = `<svg class="item-icon" viewBox="0 0 40 42" aria-hidden="true" shape-rendering="crispEdges">${drawing}</svg>`;
-  iconCache.set(id, svg); return svg;
+  return itemIcon(id);
 }
 
 function slotContents(item, index, hotbar = false) {
@@ -131,7 +118,16 @@ function renderInventory() {
   });
   $('#item-count').textContent = `${slots.filter(Boolean).length} / 36 SLOTS`;
   $('#inventory-mode').textContent = state.mode.toUpperCase();
-  $('#slot-help').textContent = carriedSlot === null ? 'Select a stack, then a slot to move it. The first nine slots are your hotbar.' : `Moving ${ITEMS[slots[carriedSlot].id].name}. Click another slot or press 1–9 to assign.`;
+  $('#slot-help').textContent = carriedSlot === null ? '' : ITEMS[slots[carriedSlot]?.id]?.name || '';
+  $('#equip-item').disabled = carriedSlot === null || !ITEMS[slots[carriedSlot]?.id]?.armorSlot;
+  $('#drop-item').disabled = carriedSlot === null;
+  $('#equipment-grid').innerHTML = '';
+  for (const name of ['helmet', 'chestplate', 'leggings', 'boots', 'offhand']) {
+    const item = state.equipment[name], button = document.createElement('button'); button.className = 'inv-slot equipment-slot';
+    button.innerHTML = item ? icon(item.id) : `<i data-lucide="${{ helmet: 'hard-hat', chestplate: 'shirt', leggings: 'columns-2', boots: 'footprints', offhand: 'shield' }[name]}"></i>`;
+    button.title = item ? ITEMS[item.id].name : name; button.setAttribute('aria-label', item ? `Unequip ${ITEMS[item.id].name}` : `Empty ${name}`);
+    button.onclick = () => { if (item && !unequip(state, name)) toast('Backpack is full'); renderInventory(); renderHotbar(); }; $('#equipment-grid').append(button);
+  }
   const near = state.world.nearTable(state.player), creative = state.mode === 'creative';
   $('#table-status').textContent = near || creative ? 'TABLE READY' : 'HAND CRAFTING';
   $('#table-status').classList.toggle('ready', near || creative);
@@ -144,20 +140,46 @@ function renderInventory() {
   const available = state.inventory.canCraft(recipe, near, creative);
   $('#craft-button').disabled = !available.ok; $('#craft-button').textContent = available.ok ? `Craft ${recipe.count > 1 ? `${recipe.count} ` : ''}${ITEMS[recipe.id].name.toLowerCase()}` : available.reason;
   $('#recipe-list').innerHTML = '';
+  const recipeQuery = $('#recipe-search').value.toLowerCase().trim();
   RECIPES.forEach((r, i) => {
+    if (recipeQuery && !ITEMS[r.id].name.toLowerCase().includes(recipeQuery)) return;
     const button = document.createElement('button'); button.className = `recipe-card${i === selectedRecipe ? ' selected' : ''}${state.inventory.canCraft(r, near, creative).ok ? ' available' : ''}`;
     button.innerHTML = icon(r.id); button.title = ITEMS[r.id].name + (r.table ? ' · crafting table' : ''); button.setAttribute('aria-label', `Recipe: ${ITEMS[r.id].name}`); button.setAttribute('aria-pressed', i === selectedRecipe);
     button.onclick = () => { selectedRecipe = i; renderInventory(); }; $('#recipe-list').append(button);
   });
   $('#recipe-count').textContent = `${RECIPES.length} RECIPES`;
   $('#creative-palette').classList.toggle('hidden', !creative);
-  if (creative) {
-    $('#palette-grid').innerHTML = '';
-    for (const [id, def] of Object.entries(ITEMS)) {
-      const button = document.createElement('button'); button.className = 'recipe-card'; button.innerHTML = icon(id); button.title = `Add ${def.name}`; button.setAttribute('aria-label', `Add ${def.name}`);
-      button.onclick = () => { if (state.inventory.add(id, def.tool ? 1 : 64)) toast('Your backpack is full.'); renderInventory(); renderHotbar(); }; $('#palette-grid').append(button);
-    }
+  if (creative) renderPalette();
+  createIcons({ icons });
+}
+function renderPalette() {
+  const query = $('#item-search').value.trim().toLowerCase();
+  const entries = Object.entries(ITEMS).filter(([, d]) => (paletteCategory === 'all' || d.category === paletteCategory) && d.name.toLowerCase().includes(query));
+  const pages = Math.max(1, Math.ceil(entries.length / 45)); palettePage = Math.min(palettePage, pages - 1);
+  $('#palette-grid').innerHTML = '';
+  for (const [id, def] of entries.slice(palettePage * 45, (palettePage + 1) * 45)) {
+    const button = document.createElement('button'); button.className = 'recipe-card'; button.innerHTML = icon(id); button.title = `Add ${def.name}`; button.setAttribute('aria-label', `Add ${def.name}`);
+    button.onclick = event => {
+      if (event.shiftKey) state.inventory.slots[state.selected] = { id, count: def.stack === 1 || def.spawn ? 1 : 64, ...(def.durability ? { durability: def.durability } : {}) };
+      else if (state.inventory.add(id, def.stack === 1 || def.spawn ? 1 : 64)) toast('Your backpack is full.');
+      renderInventory(); renderHotbar();
+    }; $('#palette-grid').append(button);
   }
+  $('#palette-count').textContent = `${entries.length} items`;
+  $('#palette-page').textContent = `${palettePage + 1} / ${pages}`; $('#palette-prev').disabled = palettePage <= 0; $('#palette-next').disabled = palettePage >= pages - 1;
+}
+function renderTrade() {
+  const mob = state.mobs.mobs.find(m => m.uid === activeTrader); if (!mob) return setOverlay('play');
+  $('#trader-name').textContent = MOBS[mob.type].name;
+  $('#trade-list').innerHTML = '';
+  for (const [i, trade] of TRADES.entries()) {
+    const button = document.createElement('button'); button.className = 'trade-offer';
+    button.innerHTML = `<span>${icon(trade.take)}<b>${trade.amount}</b></span><i data-lucide="arrow-right"></i><span>${icon(trade.give)}<b>${trade.count}</b></span><span>${ITEMS[trade.give].name}</span>`;
+    button.title = `${trade.amount} ${ITEMS[trade.take].name} for ${trade.count} ${ITEMS[trade.give].name}`; button.setAttribute('aria-label', button.title);
+    button.disabled = state.inventory.count(trade.take) < trade.amount;
+    button.onclick = () => { const result = state.mobs.trade(activeTrader, i, state); if (!result.ok) toast(result.reason); else { tone('craft'); renderHotbar(); renderTrade(); saveWorld(); } }; $('#trade-list').append(button);
+  }
+  $('#trade-balance').textContent = `${state.inventory.count('emerald')} emeralds`; createIcons({ icons });
 }
 function craft() {
   const recipe = RECIPES[selectedRecipe]; const result = state.inventory.craft(recipe, state.world.nearTable(state.player), state.mode === 'creative');
@@ -168,14 +190,16 @@ function craft() {
 
 function clearInput() { keys.clear(); mineHeld = false; mining = null; pointerDrag = null; }
 function setOverlay(next) {
-  overlay = next; clearInput();
+  overlay = next; clearInput(); needsRender = true;
   $('#home-screen').classList.toggle('active', next === 'home'); $('#game-screen').classList.toggle('active', !!state && next !== 'home');
-  for (const name of ['inventory', 'pause', 'help']) $(`#${name}-modal`).classList.toggle('hidden', next !== name);
+  for (const name of ['inventory', 'pause', 'help', 'trade']) $(`#${name}-modal`).classList.toggle('hidden', next !== name);
   if (next !== 'play' && document.pointerLockElement) document.exitPointerLock();
   $('#capture-hint').classList.toggle('hidden', next !== 'play' || !!document.pointerLockElement || touch);
   if (next === 'inventory') { carriedSlot = null; renderInventory(); $('#close-inventory').focus(); }
   if (next === 'pause') { saveWorld(); $('#resume-btn').focus(); }
   if (next === 'help') $('#close-help').focus();
+  if (next === 'trade') { renderTrade(); $('#close-trade').focus(); }
+  if (next === 'play') document.activeElement?.blur();
 }
 function capture() {
   if (touch || overlay !== 'play' || document.pointerLockElement) return;
@@ -209,15 +233,17 @@ async function enterWorld(saved = null) {
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   try {
     const seed = saved?.seed || $('#seed-input').value.trim() || 'cedar-valley';
-    const world = new World(seed).generate(); if (saved) world.applyEdits(saved.edits);
+    const world = new World(seed, saved ? saved.worldVersion || 1 : 2).generate(); if (saved) world.applyEdits(saved.edits);
     const mode = saved?.mode || selectedMode;
     const player = { ...world.spawn, yaw: -.245, pitch: -.015, vy: 0, grounded: false, flying: false, ...(saved?.player || {}) };
     if (collides(world, player)) Object.assign(player, world.spawn);
     state = { id: saved?.id || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, world, mode, player, inventory: saved ? new Inventory(saved.inventory) : Inventory.starter(mode === 'creative'), selected: saved?.selected || 0, health: saved?.health || 20, food: saved?.food ?? 20, xp: saved?.xp || 0, elapsed: saved?.elapsed || 0, progress: saved?.progress || {}, survivalTimer: 0, oxygen: 12 };
-    view.attach(world); renderHotbar(); $('#world-title').textContent = seed.replaceAll('-', ' ').toUpperCase(); $('#world-seed-label').textContent = `${mode.toUpperCase()} · ${SIZE} × ${SIZE} WORLD`;
+    state.equipment = saved?.equipment || {}; state.effects = saved?.effects || {}; state.attackCooldown = 0; state.riding = null;
+    state.mobs = new MobSystem(world, saved?.entities);
+    view.attach(world); view.mobSystem = state.mobs; renderHotbar(); $('#world-title').textContent = seed.replaceAll('-', ' ').toUpperCase(); $('#world-seed-label').textContent = `${mode.toUpperCase()} · ${SIZE} × ${SIZE} WORLD`;
     $('#quest').classList.remove('hidden'); saveTimer = 0; setOverlay('play'); updateHud();
     if (!saveWorld()) toast('Saving is unavailable in this browser. Your world will last while this tab is open.');
-    else toast(saved ? 'Welcome back. Your little world missed you.' : 'A new adventure. Press E to open your backpack.');
+    else toast(saved ? 'World loaded' : 'World created');
   } catch (error) { console.error(error); setOverlay('home'); toast(`Could not open this world: ${error.message}`); }
   finally { $('#loading').classList.add('hidden'); $('#play-btn').disabled = false; }
 }
@@ -227,11 +253,12 @@ function respawn() {
   // A player may have built over the clearing since their last visit.
   for (let y = state.world.spawn.y; y < HEIGHT + 2; y++) { state.player.y = y; if (!collides(state.world, state.player)) break; }
   state.health = 20; state.food = Math.max(12, state.food); state.oxygen = 12; clearInput();
+  state.effects = {}; state.riding = null;
   toast('Back at the clearing. Your backpack came with you.'); saveWorld();
 }
-function damage(amount) {
-  if (state.mode === 'creative') return;
-  state.health = Math.max(0, state.health - amount); tone('hurt'); $('#damage-overlay').classList.add('flash'); setTimeout(() => $('#damage-overlay').classList.remove('flash'), 220);
+function damage(amount, effect = null) {
+  if (!hitPlayer(state, amount, effect)) return;
+  tone('hurt'); $('#damage-overlay').classList.add('flash'); setTimeout(() => $('#damage-overlay').classList.remove('flash'), 220);
   if (state.health <= 0) respawn();
 }
 
@@ -243,29 +270,35 @@ function movePlayer(dt) {
   let forward = Number(keys.has('KeyW')) - Number(keys.has('KeyS')), side = Number(keys.has('KeyD')) - Number(keys.has('KeyA'));
   const length = Math.hypot(forward, side); if (length) { forward /= length; side /= length; }
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
-  const speed = p.flying ? 9 : water ? 2.8 : sprint && state.food > 3 ? 6.4 : 4.2;
+  const mount = state.mobs.mobs.find(m => m.uid === state.riding);
+  if (state.riding && !mount) state.riding = null;
+  const bodyHeight = mount ? 1.82 + MOBS[mount.type].height * .45 : 1.8;
+  const bodyRadius = mount ? Math.min(.65, MOBS[mount.type].width / 2) : .29;
+  const speed = (mount ? MOBS[mount.type].speed * 2.5 : p.flying ? 9 : water ? 2.8 : sprint && state.food > 3 ? 6.4 : 4.2) * (state.effects.speed ? 1.4 : state.effects.slowness ? .55 : 1);
   const dx = (-Math.sin(p.yaw) * forward + Math.cos(p.yaw) * side) * speed * dt;
   const dz = (-Math.cos(p.yaw) * forward - Math.sin(p.yaw) * side) * speed * dt;
   const moveAxis = (axis, distance) => {
     const count = Math.max(1, Math.ceil(Math.abs(distance) / .12));
-    for (let i = 0; i < count; i++) { const old = p[axis]; p[axis] += distance / count; if (collides(world, p)) { p[axis] = old; return false; } }
+    for (let i = 0; i < count; i++) { const old = p[axis]; p[axis] += distance / count; if (collides(world, p, bodyHeight, bodyRadius)) { p[axis] = old; return false; } }
     return true;
   };
   moveAxis('x', dx); moveAxis('z', dz);
   if (p.flying) { p.vy = 0; moveAxis('y', (Number(keys.has('Space')) - Number(sprint)) * 7 * dt); p.y = Math.min(p.y, HEIGHT + 20); }
   else {
     if (keys.has('Space') && (p.grounded || water)) { p.vy = water ? 4 : 8.2; p.grounded = false; }
-    p.vy = Math.max(water ? -4 : -26, p.vy - (water ? 8 : 23) * dt);
+    p.vy = state.effects.levitation ? 2 : Math.max(state.effects.slow_falling ? -2 : water ? -4 : -26, p.vy - (water ? 8 : 23) * dt);
     const wasFalling = p.vy; p.grounded = false;
     if (!moveAxis('y', p.vy * dt)) { p.grounded = wasFalling < 0; if (p.grounded && wasFalling < -12 && !water) damage(Math.floor((Math.abs(wasFalling) - 10) * .6)); p.vy = 0; }
   }
+  if (mount?.type === 'strider' && p.vy <= 0 && world.get(Math.floor(p.x), Math.floor(p.y - .05), Math.floor(p.z)) === B.LAVA) { p.y = Math.floor(p.y - .05) + 1; p.vy = 0; p.grounded = true; }
   if (p.y < -5) respawn();
   p.yaw += (Number(keys.has('ArrowLeft')) - Number(keys.has('ArrowRight'))) * dt * 1.65;
   p.pitch = clamp(p.pitch + (Number(keys.has('ArrowUp')) - Number(keys.has('ArrowDown'))) * dt * 1.2, -1.53, 1.53);
   if (length && p.grounded) { footstepTime += dt; if (footstepTime > (sprint ? .28 : .43)) { tone('step'); footstepTime = 0; } }
   if (state.mode !== 'creative') {
     if (length) state.food = Math.max(0, state.food - dt * (sprint ? .035 : .012));
-    state.oxygen = submerged ? Math.max(0, state.oxygen - dt) : 12;
+    state.oxygen = submerged && !state.effects.water_breathing && state.equipment.helmet?.id !== 'turtle_helmet' ? Math.max(0, state.oxygen - dt) : 12;
+    if (mount?.type !== 'strider' && world.get(Math.floor(p.x), Math.floor(p.y + .2), Math.floor(p.z)) === B.LAVA) damage(dt * 4, 'fire');
     state.survivalTimer += dt;
     if (state.survivalTimer > 4) {
       state.survivalTimer = 0;
@@ -274,15 +307,21 @@ function movePlayer(dt) {
       if (state.food >= 16 && state.health < 20) { state.health++; state.food -= .2; }
     }
   }
+  if (mount) { mount.x = p.x; mount.y = p.y; mount.z = p.z; mount.yaw = p.yaw; mount.activity = length ? 'wander' : 'idle'; }
   return length > 0;
 }
 
 function mineUpdate(dt) {
+  if (mineHeld && mobTarget) {
+    mining = null;
+    if (attackMob(state, mobTarget.mob, direction)) { swing = .7; tone('mine'); renderHotbar(); $('#save-status').textContent = 'Unsaved changes'; }
+    return;
+  }
   if (!mineHeld || !target) { mining = null; return; }
   const id = `${target.x},${target.y},${target.z}`;
   const info = miningInfo(target.id, state.inventory.slots[state.selected], state.mode === 'creative');
   if (!info.ok) { warn(info.reason); mining = null; return; }
-  if (!mining || mining.id !== id) mining = { id, elapsed: 0, total: info.time };
+  if (!mining || mining.id !== id) mining = { id, elapsed: 0, total: info.time * (state.effects.fatigue ? 2.5 : 1) };
   mining.elapsed += dt; swing = (swing + dt * 3) % 1;
   if (mining.elapsed < mining.total) return;
   const hit = { ...target }; const result = mineBlock(state.world, state.inventory, hit, state.selected, state.mode === 'creative');
@@ -290,6 +329,8 @@ function mineUpdate(dt) {
   if (!result.ok) return warn(result.reason);
   tone('mine'); view.debris(hit); state.xp += result.xp; state.progress[result.drop] = true;
   if (hit.id === B.LEAVES && state.mode !== 'creative' && Math.random() < .16) state.inventory.add('apple', 1);
+  if (hit.id === B.GRASS && state.mode !== 'creative' && state.mobs.roll() < .35) state.mobs.addDrop('seeds', 1, hit);
+  if (hit.id === B.STONE && state.mode !== 'creative' && state.mobs.roll() < .15) state.mobs.addDrop('flint', 1, hit);
   if (result.brokeTool) toast('Your tool wore out. Time to craft a new one.');
   renderHotbar(); $('#save-status').textContent = 'Unsaved changes';
 }
@@ -300,12 +341,13 @@ function interact() {
   const p = state.player;
   direction.set(-Math.sin(p.yaw) * Math.cos(p.pitch), Math.sin(p.pitch), -Math.cos(p.yaw) * Math.cos(p.pitch));
   target = raycast(state.world, { x: p.x, y: p.y + 1.62, z: p.z }, direction, state.mode === 'creative' ? 8 : 6);
-  const item = state.inventory.slots[state.selected], def = ITEMS[item?.id];
-  if (target?.id === B.TABLE && !keys.has('ShiftLeft') && !keys.has('ShiftRight')) { selectedRecipe = 6; setOverlay('inventory'); return; }
-  if (def?.food) {
-    if (state.food >= 20) return warn('You are already full.');
-    state.food = Math.min(20, state.food + def.food); if (state.mode !== 'creative') { item.count--; if (!item.count) state.inventory.slots[state.selected] = null; }
-    tone('craft'); renderHotbar(); toast('A little snack for the road.'); return;
+  const entity = state.mobs.raycast({ x: p.x, y: p.y + 1.62, z: p.z }, direction, state.mode === 'creative' ? 8 : 6)?.mob;
+  if (!entity && target?.id === B.TABLE && !keys.has('ShiftLeft') && !keys.has('ShiftRight')) { selectedRecipe = 6; setOverlay('inventory'); return; }
+  const action = useItem(state, target, direction, entity);
+  if (action.handled) {
+    if (action.result?.trade) { activeTrader = action.result.trade; setOverlay('trade'); }
+    else if (action.message || typeof action.result === 'string') toast(action.message || action.result);
+    swing = .35; tone('place'); renderHotbar(); $('#save-status').textContent = 'Unsaved changes'; return;
   }
   const result = placeBlock(state.world, state.inventory, state.selected, target, state.player, state.mode === 'creative');
   if (!result.ok) return warn(result.reason);
@@ -321,25 +363,52 @@ function updateHud() {
   $('#health-value').textContent = Math.ceil(state.health); $('#food-value').textContent = Math.ceil(state.food);
   $('#health-bar').style.width = `${state.health * 5}%`; $('#food-bar').style.width = `${state.food * 5}%`;
   $('#level-value').textContent = state.mode === 'creative' ? '∞' : Math.floor(state.xp / 100) + 1;
+  for (const [selector, value, symbol] of [['#heart-icons', state.health, 'heart'], ['#hunger-icons', state.food, 'food'], ['#armor-icons', defense(state), 'armor']]) {
+    $(selector).innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="pixel-${symbol} ${value >= (i + 1) * 2 ? 'full' : value > i * 2 ? 'half' : 'empty'}"></i>`).join('');
+    $(selector).setAttribute('aria-label', `${symbol}: ${Math.ceil(value)} of 20`);
+  }
+  $('#effect-list').textContent = Object.entries(state.effects).filter(([, time]) => time > 0).map(([key, time]) => `${key.replaceAll('_', ' ')} ${Math.ceil(time)}s`).join(' · ');
+  $('#mob-count').textContent = `${state.mobs.mobs.length} mobs`;
+  const boss = state.mobs.mobs.find(m => MOBS[m.type].boss && Math.hypot(m.x - p.x, m.z - p.z) < 40);
+  $('#boss-bar').classList.toggle('hidden', !boss);
+  if (boss) { $('#boss-name').textContent = MOBS[boss.type].name; $('#boss-health').style.width = `${boss.health / MOBS[boss.type].health * 100}%`; }
   $('#mode-label').textContent = p.flying ? 'FLYING' : state.mode === 'creative' ? 'CREATIVE' : 'EXPLORER'; $('#xp-bar').style.width = `${state.xp % 100}%`;
   const item = state.inventory.slots[state.selected]; const info = target ? miningInfo(target.id, item, state.mode === 'creative') : null;
-  $('#target-label').textContent = target ? `${BLOCKS[target.id].name}${!info.ok ? ` · ${info.reason}` : target.id === B.TABLE ? ' · Right-click to craft' : ''}` : '';
-  $('#target-label').classList.toggle('requires-tool', !!target && !info.ok);
+  $('#target-label').textContent = mobTarget ? `${MOBS[mobTarget.mob.type].name} · ${Math.ceil(mobTarget.mob.health)} HP${mobTarget.mob.tamed ? ' · Tamed' : ''}` : target ? `${BLOCKS[target.id].name}${!info.ok ? ` · ${info.reason}` : ''}` : '';
+  $('#target-label').classList.toggle('requires-tool', !mobTarget && !!target && !info.ok);
+}
+
+function processMobEvents() {
+  for (const event of state.mobs.events.splice(0)) {
+    if (event.type === 'damage') damage(event.amount, event.effect);
+    if (event.type === 'xp') state.xp += event.amount;
+    if (event.type === 'inventory') renderHotbar();
+    if (event.type === 'message') toast(event.message);
+    if (event.type === 'blast') { const d = Math.hypot(state.player.x - event.x, state.player.y - event.y, state.player.z - event.z); if (d < event.radius + 1) damage(event.amount * (1 - d / (event.radius + 1)), event.effect); tone('mine'); }
+    if (event.type === 'wind' && Math.hypot(state.player.x - event.x, state.player.z - event.z) < 3) state.player.vy = 9;
+  }
 }
 
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(.1, (now - (lastTime || now)) / 1000); lastTime = now;
   if (document.hidden) return;
+  if (state && overlay !== 'play' && overlay !== 'home' && !needsRender) return;
+  if ((!state || overlay === 'home') && now - lastMenuFrame < 50) return;
+  if (!state || overlay === 'home') lastMenuFrame = now;
+  needsRender = false;
   let moving = false;
   if (state && overlay !== 'home') {
-    if (overlay === 'play') { state.elapsed += dt; moving = movePlayer(dt); }
+    if (overlay === 'play') { state.elapsed += dt; updateEffects(state, dt); moving = movePlayer(dt); state.moving = moving; state.mobs.update(dt, state); processMobEvents(); if (state.health <= 0) respawn(); }
     const p = state.player;
-    view.camera.position.set(p.x, p.y + 1.62, p.z); view.camera.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
+    const mount = state.mobs.mobs.find(m => m.uid === state.riding);
+    view.camera.position.set(p.x, p.y + 1.62 + (mount ? MOBS[mount.type].height * .45 : 0), p.z); view.camera.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
     view.camera.getWorldDirection(direction); target = raycast(state.world, view.camera.position, direction, state.mode === 'creative' ? 8 : 6);
+    mobTarget = state.mobs.raycast(view.camera.position, direction, state.mode === 'creative' ? 8 : 6);
+    if (mobTarget?.mob.uid === state.riding) mobTarget = null;
     if (overlay === 'play') mineUpdate(dt);
     const progress = mining ? clamp(mining.elapsed / mining.total, 0, 1) : 0;
-    view.target(overlay === 'play' ? target : null, progress);
+    view.target(overlay === 'play' && !mobTarget ? target : null, progress);
     $('#mine-progress').classList.toggle('active', progress > 0); $('#mine-progress i').style.width = `${progress * 100}%`;
     if (!mineHeld) swing = Math.max(0, swing - dt * 3);
     view.update(overlay === 'play' ? dt : 0, (8.67 + state.elapsed / 60) % 24, p, { moving, swing });
@@ -370,18 +439,26 @@ $('#help-btn').onclick = () => { helpReturn = 'pause'; setOverlay('help'); };
 $('#close-help').onclick = () => setOverlay(helpReturn);
 $('#close-inventory').onclick = () => { setOverlay('play'); saveWorld(); capture(); };
 $('#craft-button').onclick = craft;
+$('#item-search').oninput = () => { palettePage = 0; renderPalette(); };
+$('#recipe-search').oninput = renderInventory;
+$('#palette-prev').onclick = () => { palettePage--; renderPalette(); };
+$('#palette-next').onclick = () => { palettePage++; renderPalette(); };
+for (const button of document.querySelectorAll('[data-category]')) button.onclick = () => { paletteCategory = button.dataset.category; palettePage = 0; document.querySelectorAll('[data-category]').forEach(b => { b.classList.toggle('selected', b === button); b.setAttribute('aria-selected', b === button); }); renderPalette(); };
+$('#equip-item').onclick = () => { if (carriedSlot !== null) equip(state, carriedSlot); carriedSlot = null; renderInventory(); renderHotbar(); };
+$('#drop-item').onclick = () => { if (carriedSlot === null) return; if (!dropStack(state, carriedSlot)) toast('No room for more ground items'); carriedSlot = null; renderInventory(); renderHotbar(); };
+$('#close-trade').onclick = () => { setOverlay('play'); saveWorld(); capture(); };
 
 window.addEventListener('keydown', e => {
-  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  if ((e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) && e.code !== 'Escape' && e.code !== 'Tab') return;
   // Keep keyboard focus in the currently open dialog.
-  if (e.code === 'Tab' && ['inventory', 'pause', 'help'].includes(overlay)) {
-    const controls = [...$(`#${overlay}-modal`).querySelectorAll('button:not(:disabled), select')].filter(el => el.getClientRects().length);
+  if (e.code === 'Tab' && ['inventory', 'pause', 'help', 'trade'].includes(overlay)) {
+    const controls = [...$(`#${overlay}-modal`).querySelectorAll('button:not(:disabled), select, input')].filter(el => el.getClientRects().length);
     const index = controls.indexOf(document.activeElement), next = e.shiftKey ? (index - 1 + controls.length) % controls.length : (index + 1) % controls.length;
     e.preventDefault(); controls[next]?.focus(); return;
   }
   if (e.code === 'Escape') {
     e.preventDefault(); if (e.repeat) return;
-    if (overlay === 'help') setOverlay(helpReturn); else if (overlay === 'inventory') setOverlay('play'); else if (overlay === 'pause') setOverlay('play'); else if (overlay === 'play') setOverlay('pause'); return;
+    if (overlay === 'help') setOverlay(helpReturn); else if (overlay === 'inventory' || overlay === 'trade') setOverlay('play'); else if (overlay === 'pause') setOverlay('play'); else if (overlay === 'play') setOverlay('pause'); return;
   }
   if (!state || overlay === 'home' || overlay === 'help' || overlay === 'pause') return;
   if (e.code === 'KeyE' && !e.repeat) { e.preventDefault(); if (overlay === 'play') setOverlay('inventory'); else { setOverlay('play'); saveWorld(); capture(); } return; }
@@ -428,9 +505,12 @@ for (const button of document.querySelectorAll('[data-key]')) {
 $('#touch-mine').addEventListener('pointerdown', e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); mineHeld = true; });
 for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) $('#touch-mine').addEventListener(event, () => mineHeld = false);
 $('#touch-place').onclick = interact; $('#touch-inventory').onclick = () => setOverlay('inventory');
-window.addEventListener('resize', () => view.resize());
+window.addEventListener('resize', () => { view.resize(); needsRender = true; });
 window.addEventListener('pagehide', () => saveWorld());
 window.addEventListener('beforeunload', () => saveWorld());
 
-view.attach(new World('cedar-valley').generate());
+const menuWorld = new World('cedar-valley').generate();
+view.attach(menuWorld); view.mobSystem = new MobSystem(menuWorld);
+$('#bestiary-list').innerHTML = MOB_LIST.map(m => `<article><div>${icon(`${m.id}_spawn_egg`)}</div><strong>${m.name}</strong><span>${m.health} HP · ${m.habitat}</span><small>${m.drops.map(d => ITEMS[d.id].name).join(', ') || 'No item drops'}</small></article>`).join('');
+createIcons({ icons });
 refreshSaves(); requestAnimationFrame(frame);

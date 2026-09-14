@@ -1,4 +1,7 @@
-export const B = Object.freeze({ AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, LOG: 5, LEAVES: 6, WATER: 7, COAL: 8, IRON: 9, GOLD: 10, DIAMOND: 11, PLANKS: 12, TABLE: 13, BEDROCK: 14, GLASS: 15, TORCH: 16, BRICK: 17 });
+import { EXTRA_BLOCKS, EXTRA_ITEMS, contentRecipes } from './content.js';
+import { MOB_LIST } from './mob-catalog.js';
+
+export const B = Object.freeze({ AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, LOG: 5, LEAVES: 6, WATER: 7, COAL: 8, IRON: 9, GOLD: 10, DIAMOND: 11, PLANKS: 12, TABLE: 13, BEDROCK: 14, GLASS: 15, TORCH: 16, BRICK: 17, ...Object.fromEntries(EXTRA_BLOCKS.map(b => [b.key, b.id])) });
 
 export const BLOCKS = [
   { name: 'Air', solid: false },
@@ -63,7 +66,14 @@ export const RECIPES = [
   { id: 'brick', count: 4, needs: { stone: 4 }, table: true, pattern: ['stone', 'stone', null, 'stone', 'stone'], note: 'A solid foundation.' },
 ];
 
-export const isSolid = id => id > 0 && BLOCKS[id].solid !== false;
-export const isTransparent = id => id === B.AIR || id === B.WATER || id === B.LEAVES || id === B.GLASS || id === B.TORCH;
+BLOCKS.push(...EXTRA_BLOCKS);
+Object.assign(ITEMS, EXTRA_ITEMS);
+for (const b of EXTRA_BLOCKS) if (b.key !== 'LAVA') ITEMS[b.item] = { name: b.name, color: b.color, block: b.id, category: 'blocks' };
+for (const mob of MOB_LIST) ITEMS[`${mob.id}_spawn_egg`] = { name: `${mob.name} spawn egg`, color: mob.color, accent: mob.accent, shape: 'egg', spawn: mob.id, category: 'mobs' };
+for (const def of Object.values(ITEMS)) def.category ||= def.block ? 'blocks' : def.tool ? 'tools' : def.food ? 'food' : 'materials';
+RECIPES.push(...contentRecipes());
+
+export const isSolid = id => id > 0 && !!BLOCKS[id] && BLOCKS[id].solid !== false;
+export const isTransparent = id => id === B.AIR || id === B.WATER || id === B.LEAVES || id === B.GLASS || id === B.TORCH || BLOCKS[id]?.transparent;
 export const stackLimit = id => ITEMS[id]?.stack || 64;
 export const freshItem = (id, count = 1) => ({ id, count, ...(ITEMS[id]?.durability ? { durability: ITEMS[id].durability } : {}) });

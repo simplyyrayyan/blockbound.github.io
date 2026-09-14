@@ -24,7 +24,8 @@ export function noise(x, z, seed) {
 const fbm = (x, z, seed) => noise(x, z, seed) * .6 + noise(x * 2, z * 2, seed + 71) * .27 + noise(x * 4, z * 4, seed + 172) * .13;
 
 export class World {
-  constructor(seed = 'cedar-valley') {
+  constructor(seed = 'cedar-valley', version = 2) {
+    this.version = version;
     this.seed = String(seed).slice(0, 36);
     this.number = hashString(this.seed);
     this.blocks = new Uint8Array(SIZE * SIZE * HEIGHT);
@@ -106,7 +107,46 @@ export class World {
     this.tree(cx + 1, 23, cz - 4);
     this.tree(cx - 5, 23, cz - 2);
     this.spawn.y = 23;
+    if (this.version >= 2) this.enrich();
     return this;
+  }
+  biome(x, z) {
+    if (x > 73 && z < 24) return 'volcanic';
+    if (x > 73 && z > 73) return 'end';
+    if (x < 23 && z > 70) return 'snow';
+    if (x > 64 && z > 42 && z < 70) return 'pale';
+    if (x < 23 && z < 23) return 'desert';
+    const h = this.heights[Math.floor(z) * SIZE + Math.floor(x)];
+    if (h <= SEA) return 'water';
+    if (h <= SEA + 1) return 'beach';
+    if (h >= 27) return 'mountain';
+    return (x + z) % 37 < 21 ? 'forest' : 'meadow';
+  }
+  enrich() {
+    for (let x = 1; x < SIZE - 1; x++) for (let z = 1; z < SIZE - 1; z++) {
+      const h = this.heights[z * SIZE + x], biome = this.biome(x, z);
+      for (let y = 1; y < HEIGHT; y++) {
+        const id = this.get(x, y, z), r = hash(x, y, z, this.number + 713);
+        if (id === B.STONE) {
+          const next = r < .008 && y < 12 ? B.EMERALD_ORE : r < .022 && y < 12 ? B.REDSTONE_ORE : r < .03 ? B.LAPIS_ORE : r < .047 ? B.COPPER_ORE : r < .055 ? B.AMETHYST : y < 5 ? B.DEEPSLATE : null;
+          if (next) this.raw(x, y, z, next);
+        }
+        // Keep the starting clearing and its two tutorial trees unchanged.
+        if (Math.hypot(x - 48, z - 48) < 9) continue;
+        if (id === B.LOG || id === B.LEAVES) {
+          const log = id === B.LOG;
+          const type = biome === 'snow' ? (log ? B.SPRUCE_LOG : B.SPRUCE_LEAVES) : biome === 'pale' ? (log ? B.BIRCH_LOG : B.LEAVES) : z > 56 ? (log ? B.CHERRY_LOG : B.CHERRY_LEAVES) : x % 19 < 10 ? (log ? B.BIRCH_LOG : B.LEAVES) : id;
+          this.raw(x, y, z, ['desert', 'volcanic', 'end'].includes(biome) ? B.AIR : type);
+        }
+      }
+      if (Math.hypot(x - 48, z - 48) < 10) continue;
+      if (biome === 'volcanic' || biome === 'end' || biome === 'desert') {
+        for (let y = h - 2; y <= Math.max(h, SEA); y++) this.raw(x, y, z, biome === 'volcanic' ? (y === h && hash(x, 0, z, this.number) < .13 ? B.LAVA : B.NETHERRACK) : biome === 'end' ? B.END_STONE : B.SAND);
+        if (biome === 'volcanic' && hash(x, 1, z, this.number) < .055) this.raw(x, h, z, B.GLOWSTONE);
+        if (biome === 'desert' && hash(x, 1, z, this.number) < .015) for (let y = h + 1; y <= h + 3; y++) this.raw(x, y, z, B.CACTUS);
+      } else if (biome === 'snow') this.raw(x, h, z, h <= SEA ? B.ICE : B.SNOW);
+      else if (this.get(x, h, z) === B.GRASS && this.get(x, h + 1, z) === B.AIR && hash(x, 1, z, this.number + 211) < .008) this.raw(x, h + 1, z, z > 55 ? B.MELON : B.PUMPKIN);
+    }
   }
   tree(x, y, z) {
     const length = 5 + Math.floor(hash(x, y, z, this.number) * 2);

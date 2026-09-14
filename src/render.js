@@ -1,6 +1,10 @@
 import * as THREE from 'three';
-import { B, BLOCKS, ITEMS, isSolid, isTransparent } from './catalog.js';
-import { SIZE, HEIGHT, CHUNK, SEA, hash, clamp } from './world.js';
+import { B, BLOCKS, ITEMS, isTransparent } from './catalog.js';
+import { SIZE, HEIGHT, CHUNK, hash, clamp } from './world.js';
+import { MobRenderer } from './mob-models.js';
+import { itemImage, setItemAtlas } from './item-art.js';
+
+const ATLAS_TILES = 16;
 
 const FACES = [
   { n: [1, 0, 0], v: [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]], shade: .87 },
@@ -18,29 +22,31 @@ function colorVariation(hex, delta) {
 }
 
 export function makeAtlas() {
-  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128;
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = ATLAS_TILES * 16;
   const ctx = canvas.getContext('2d');
   for (let id = 1; id < BLOCKS.length; id++) for (let side = 0; side < 3; side++) {
-    const index = id * 3 + side, ox = index % 8 * 16, oy = Math.floor(index / 8) * 16;
+    const index = id * 3 + side, ox = index % ATLAS_TILES * 16, oy = Math.floor(index / ATLAS_TILES) * 16;
+    const style = BLOCKS[id].texture;
     ctx.save(); ctx.translate(ox, oy);
     let base = BLOCKS[id].color;
-    if ([B.COAL, B.IRON, B.GOLD, B.DIAMOND].includes(id)) base = '#85898a';
+    if ([B.COAL, B.IRON, B.GOLD, B.DIAMOND].includes(id) || style === 'ore') base = '#85898a';
     if (id === B.GRASS && side > 0) base = '#916341';
     if (id === B.LOG && side !== 1) base = '#bf985e';
     for (let px = 0; px < 16; px++) for (let py = 0; py < 16; py++) {
-      ctx.fillStyle = colorVariation(base, (hash(px, id + side, py, 333) - .5) * .11);
+      ctx.fillStyle = colorVariation(base, (hash(px, id + side, py, 333) - .5) * .19);
       ctx.fillRect(px, py, 1, 1);
     }
     if (id === B.GRASS && side === 1) {
       for (let x = 0; x < 16; x++) { ctx.fillStyle = colorVariation('#80a94d', (hash(x, 0, 0) - .5) * .08); ctx.fillRect(x, 0, 1, 3 + Math.floor(hash(x, 0, 0) * 3)); }
     }
-    if (id === B.LOG) {
+    if (id === B.LOG || style === 'log') {
       ctx.strokeStyle = '#6d4b32'; ctx.lineWidth = 1;
       if (side === 1) {
-        for (let x = 1; x < 16; x += 3) { ctx.fillStyle = x % 2 ? '#65482e' : '#a4774a'; ctx.fillRect(x, 0, 1, 16); ctx.fillRect(x + 1, (x * 3) % 13, 1, 4); }
+        for (let x = 1; x < 16; x += 3) { ctx.fillStyle = colorVariation(base, x % 2 ? -.14 : .1); ctx.fillRect(x, 0, 1, 16); ctx.fillRect(x + 1, (x * 3) % 13, 1, 4); }
+        if (id === B.BIRCH_LOG) for (const [x, y, w] of [[0, 3, 4], [7, 8, 5], [2, 14, 6], [12, 1, 3]]) { ctx.fillStyle = '#494d48'; ctx.fillRect(x, y, w, 1); ctx.fillRect(x + 1, y + 1, w - 2, 1); }
       } else { for (let inset = 1.5; inset < 8; inset += 3) ctx.strokeRect(inset, inset, 16 - inset * 2, 16 - inset * 2); }
     }
-    if ([B.COAL, B.IRON, B.GOLD, B.DIAMOND].includes(id)) {
+    if ([B.COAL, B.IRON, B.GOLD, B.DIAMOND].includes(id) || style === 'ore') {
       const gem = BLOCKS[id].color;
       for (const [x, y] of [[2, 3], [9, 2], [6, 7], [11, 11], [2, 12]]) {
         ctx.fillStyle = colorVariation(gem, -.09); ctx.fillRect(x, y, 3, 3);
@@ -48,15 +54,16 @@ export function makeAtlas() {
         ctx.fillStyle = colorVariation(gem, .1); ctx.fillRect(x, y, 1, 1);
       }
     }
-    if (id === B.LEAVES) {
+    if (id === B.LEAVES || style === 'leaves') {
       for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
         const r = hash(x, id, y);
         if (r < .055) ctx.clearRect(x, y, 1, 1);
-        else if (r < .22) { ctx.fillStyle = '#335d37'; ctx.fillRect(x, y, 2, 1); }
+        else if (r < .26) { ctx.fillStyle = colorVariation(base, -.14); ctx.fillRect(x, y, 2, 1); }
+        else if (r > .83) { ctx.fillStyle = colorVariation(base, .1); ctx.fillRect(x, y, 2, 2); }
       }
     }
-    if (id === B.PLANKS || id === B.TABLE || id === B.BRICK) {
-      ctx.fillStyle = id === B.BRICK ? '#626b69' : '#815b38';
+    if (id === B.PLANKS || id === B.TABLE || id === B.BRICK || ['planks', 'brick'].includes(style)) {
+      ctx.fillStyle = colorVariation(base, -.18);
       for (let y = 3; y < 16; y += 4) { ctx.fillRect(0, y, 16, 1); ctx.fillRect(y % 8 ? 4 : 11, y - 3, 1, 3); }
       if (id === B.TABLE) {
         ctx.fillStyle = '#62452f'; ctx.fillRect(0, 0, 16, 2); ctx.fillRect(0, 0, 2, 16); ctx.fillRect(14, 0, 2, 16); ctx.fillRect(0, 14, 16, 2);
@@ -64,12 +71,18 @@ export function makeAtlas() {
         else { ctx.fillStyle = '#453c31'; ctx.fillRect(4, 5, 8, 3); ctx.fillRect(5, 8, 2, 5); ctx.fillRect(10, 8, 1, 4); }
       }
     }
-    if (id === B.GLASS) {
+    if (id === B.GLASS || style === 'glass') {
       ctx.clearRect(0, 0, 16, 16); ctx.fillStyle = 'rgba(195,235,233,.12)'; ctx.fillRect(0, 0, 16, 16);
       ctx.strokeStyle = '#bddee1'; ctx.strokeRect(.5, .5, 15, 15); ctx.fillStyle = '#e4f4ed'; ctx.fillRect(3, 3, 2, 1); ctx.fillRect(5, 4, 2, 1); ctx.fillRect(10, 11, 2, 1);
     }
     if (id === B.WATER) { ctx.fillStyle = 'rgba(215,242,235,.13)'; ctx.fillRect(1, 5, 6, 1); ctx.fillRect(8, 12, 6, 1); }
     if (id === B.TORCH) { ctx.fillStyle = '#654b32'; ctx.fillRect(0, 5, 16, 11); ctx.fillStyle = '#fff3a0'; ctx.fillRect(0, 0, 16, 5); }
+    if (['wool', 'hay', 'pumpkin', 'cactus'].includes(style)) for (let x = 1; x < 16; x += style === 'wool' ? 2 : 4) { ctx.fillStyle = colorVariation(base, -.1); ctx.fillRect(x, 0, 1, 16); }
+    if (style === 'cobble' || style === 'sponge') for (let i = 0; i < 12; i++) { ctx.fillStyle = colorVariation(base, -.2); ctx.fillRect(hash(i, id, 0) * 13, hash(i, id, 1) * 13, style === 'cobble' ? 4 : 2, 2); }
+    if (style === 'sculk' || style === 'glow' || style === 'lava' || style === 'crystal') for (let i = 0; i < 20; i++) { ctx.fillStyle = colorVariation(base, i % 3 === 0 ? .22 : -.15); ctx.fillRect(Math.floor(hash(i, id, 2) * 15), Math.floor(hash(i, id, 3) * 15), 2, 2); }
+    if (style === 'metal') { ctx.strokeStyle = colorVariation(base, -.16); ctx.strokeRect(.5, .5, 15, 15); ctx.strokeStyle = colorVariation(base, .13); ctx.strokeRect(1.5, 1.5, 13, 13); }
+    if (style === 'tnt' && side === 1) { ctx.fillStyle = '#e1dbce'; ctx.fillRect(0, 5, 16, 6); ctx.fillStyle = '#443e39'; ctx.font = 'bold 6px monospace'; ctx.fillText('TNT', 2, 10); }
+    if (style === 'bookshelf') { ctx.fillStyle = '#6d553e'; ctx.fillRect(0, 1, 16, 14); for (let i = 0; i < 7; i++) { ctx.fillStyle = ['#ae5953', '#5c8783', '#b0a265'][i % 3]; ctx.fillRect(i * 2 + 1, 2 + i % 3, 1, 11 - i % 3); } }
     ctx.restore();
   }
   const texture = new THREE.CanvasTexture(canvas);
@@ -91,11 +104,12 @@ export class VoxelRenderer {
     this.scene.add(this.camera);
     this.ambient = new THREE.HemisphereLight('#d7e9f0', '#706651', 2.05); this.scene.add(this.ambient);
     this.sunlight = new THREE.DirectionalLight('#fff0cf', 2.1); this.sunlight.position.set(-40, 70, 25); this.scene.add(this.sunlight);
-    const atlas = makeAtlas(); this.atlas = atlas.canvas;
+    const atlas = makeAtlas(); this.atlas = atlas.canvas; setItemAtlas(this.atlas, ATLAS_TILES);
     this.material = new THREE.MeshLambertMaterial({ map: atlas.texture, vertexColors: true, alphaTest: .45 });
     this.waterMaterial = new THREE.MeshPhongMaterial({ map: atlas.texture, transparent: true, opacity: .66, vertexColors: true, depthWrite: false, shininess: 80, specular: '#cbe5d9' });
     this.glassMaterial = new THREE.MeshLambertMaterial({ map: atlas.texture, transparent: true, vertexColors: true, depthWrite: false });
-    this.chunks = new Map(); this.particles = []; this.animals = []; this.clouds = new THREE.Group(); this.scene.add(this.clouds);
+    this.chunks = new Map(); this.particles = []; this.clouds = new THREE.Group(); this.scene.add(this.clouds);
+    this.mobRenderer = new MobRenderer(this.scene); this.mobSystem = null;
     this.particleGeometry = new THREE.BoxGeometry(.09, .09, .09);
     this.particleMaterials = BLOCKS.map(b => new THREE.MeshLambertMaterial({ color: b.color || '#ffffff' }));
     this.torchLights = Array.from({ length: 6 }, () => { const light = new THREE.PointLight('#ffbb65', 0, 11, 1.1); this.scene.add(light); return light; });
@@ -123,13 +137,10 @@ export class VoxelRenderer {
   attach(world) {
     this.clearWorld(); this.world = world;
     for (let x = 0; x < SIZE / CHUNK; x++) for (let z = 0; z < SIZE / CHUNK; z++) this.rebuild(x, z);
-    this.makeAnimals();
   }
   clearWorld() {
     for (const meshes of this.chunks.values()) for (const mesh of meshes) { this.scene.remove(mesh); mesh.geometry.dispose(); }
     this.chunks.clear();
-    for (const a of this.animals) { this.scene.remove(a.group); a.group.traverse(o => { o.geometry?.dispose(); if (o.material) o.material.dispose(); }); }
-    this.animals = [];
     for (const p of this.particles) this.scene.remove(p.mesh);
     this.particles = [];
     this.outline.visible = this.crackMesh.visible = false;
@@ -146,8 +157,8 @@ export class VoxelRenderer {
         const neighbor = this.world.get(x + nx, y + ny, z + nz);
         if (id !== B.TORCH && (!isTransparent(neighbor) || (neighbor === id && (id === B.WATER || id === B.GLASS || id === B.LEAVES)))) continue;
         const tile = id * 3 + (f === 2 ? 0 : f === 3 ? 2 : 1);
-        const u0 = (tile % 8 + .001) / 8, u1 = (tile % 8 + .999) / 8;
-        const v0 = 1 - (Math.floor(tile / 8) + .999) / 8, v1 = 1 - (Math.floor(tile / 8) + .001) / 8;
+        const u0 = (tile % ATLAS_TILES + .001) / ATLAS_TILES, u1 = (tile % ATLAS_TILES + .999) / ATLAS_TILES;
+        const v0 = 1 - (Math.floor(tile / ATLAS_TILES) + .999) / ATLAS_TILES, v1 = 1 - (Math.floor(tile / ATLAS_TILES) + .001) / ATLAS_TILES;
         const uv = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
         const depthShade = clamp(.56 + y / 28, .6, 1);
         for (const vi of [0, 1, 2, 0, 2, 3]) {
@@ -186,25 +197,18 @@ export class VoxelRenderer {
   box(w, h, d, color, x, y, z, parent) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color })); mesh.position.set(x, y, z); parent.add(mesh); return mesh;
   }
-  makeAnimals() {
-    for (const [i, dx, dz] of [[0, -3, 5], [1, 5, 4], [2, -12, -10], [3, 14, 12], [4, -14, 13]]) {
-      const x = SIZE / 2 + dx, z = SIZE / 2 + dz, y = this.world.surface(x, z);
-      if (this.world.get(x, y - 1, z) !== B.GRASS) continue;
-      const group = new THREE.Group();
-      this.box(.75, .63, 1.05, '#f5edda', 0, .84, 0, group);
-      this.box(.38, .4, .48, '#70655a', 0, 1.05, -.64, group);
-      this.box(.43, .16, .45, '#f5edda', 0, 1.28, -.62, group);
-      this.box(.08, .06, .03, '#242e29', -.13, 1.1, -.89, group); this.box(.08, .06, .03, '#242e29', .13, 1.1, -.89, group);
-      const legs = []; for (const lx of [-.24, .24]) for (const lz of [-.33, .33]) legs.push(this.box(.15, .5, .16, '#7c7364', lx, .27, lz, group));
-      group.position.set(x + .5, y, z + .5); this.scene.add(group); this.animals.push({ group, legs, baseX: x + .5, baseZ: z + .5, phase: i * 1.7 });
-    }
-  }
   setHeld(id) {
     if (id === this.heldId) return; this.heldId = id;
     for (const child of [...this.hand.children]) { this.hand.remove(child); child.traverse(o => { o.geometry?.dispose(); if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) { if (m.map && m.map !== this.material.map) m.map.dispose(); m.dispose(); } }); }
     const def = ITEMS[id];
     const g = new THREE.Group(); this.hand.add(g);
-    if (def?.tool) {
+    if (def?.weapon || ['trident', 'mace'].includes(id)) {
+      this.box(.075, .42, .075, '#876748', 0, -.15, 0, g);
+      this.box(.25, .06, .1, def.color, 0, .08, 0, g);
+      this.box(id === 'mace' ? .26 : .1, id === 'mace' ? .24 : .48, .07, def.color, 0, .32, 0, g);
+      if (id === 'trident') for (const side of [-1, 1]) { this.box(.05, .21, .06, def.color, side * .15, .5, 0, g); this.box(.3, .05, .06, def.color, 0, .4, 0, g); }
+      g.rotation.z = -.3;
+    } else if (def?.tool) {
       this.box(.07, .55, .07, '#86613f', 0, -.12, 0, g);
       if (def.tool === 'pick') {
         this.box(.52, .085, .09, def.color, .03, .18, 0, g); this.box(.085, .14, .09, def.color, -.23, .11, 0, g); this.box(.085, .12, .09, def.color, .28, .12, 0, g);
@@ -214,11 +218,15 @@ export class VoxelRenderer {
     } else if (def?.block) {
       const mats = FACES.map((_, f) => {
         const tile = def.block * 3 + (f === 2 ? 0 : f === 3 ? 2 : 1);
-        const texture = this.material.map.clone(); texture.repeat.set(1 / 8, 1 / 8); texture.offset.set(tile % 8 / 8, 1 - (Math.floor(tile / 8) + 1) / 8); texture.needsUpdate = true;
+        const texture = this.material.map.clone(); texture.repeat.set(1 / ATLAS_TILES, 1 / ATLAS_TILES); texture.offset.set(tile % ATLAS_TILES / ATLAS_TILES, 1 - (Math.floor(tile / ATLAS_TILES) + 1) / ATLAS_TILES); texture.needsUpdate = true;
         return new THREE.MeshLambertMaterial({ map: texture });
       });
       g.add(new THREE.Mesh(new THREE.BoxGeometry(.27, .27, .27), mats)); g.rotation.set(.12, -.45, -.15);
-    } else if (def?.food) { this.box(.18, .19, .16, '#ce6549', 0, 0, 0, g); this.box(.025, .07, .025, '#81623a', 0, .11, 0, g); }
+    } else if (def) {
+      const texture = new THREE.CanvasTexture(itemImage(id)); texture.magFilter = THREE.NearestFilter; texture.minFilter = THREE.NearestFilter; texture.colorSpace = THREE.SRGBColorSpace;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(.46, .46), new THREE.MeshLambertMaterial({ map: texture, transparent: true, alphaTest: .5, side: THREE.DoubleSide }));
+      g.add(mesh); g.rotation.z = -.2;
+    }
     else { this.box(.16, .35, .17, '#d6a781', 0, 0, 0, g); this.box(.165, .15, .175, '#566d50', 0, -.17, 0, g); g.rotation.z = -.2; }
     this.hand.traverse(o => { if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) { m.depthTest = false; m.depthWrite = false; } o.renderOrder = 5; });
   }
@@ -239,7 +247,7 @@ export class VoxelRenderer {
   }
   update(dt, time, player, { swing = 0, moving = false, menu = false } = {}) {
     const daylight = clamp(Math.sin((time - 6) / 24 * Math.PI * 2) * 2.3, 0, 1);
-    const sky = new THREE.Color('#1d2b44').lerp(new THREE.Color('#b8d6d9'), daylight);
+    const sky = new THREE.Color('#202535').lerp(new THREE.Color('#8ab8e4'), daylight);
     this.scene.background.copy(sky); this.scene.fog.color.copy(sky);
     const underground = !menu && this.world.heights[Math.floor(player.z) * SIZE + Math.floor(player.x)] > player.y + 2;
     this.ambient.intensity = (.55 + daylight * .95) * (underground ? .27 : 1); this.sunlight.intensity = (.14 + daylight * 1.15) * (underground ? .12 : 1);
@@ -248,16 +256,6 @@ export class VoxelRenderer {
     this.sun.visible = daylight > .05; this.moon.position.set(player.x + Math.cos(angle) * 62, 15 - Math.sin(angle) * 62, player.z - 55); this.moon.lookAt(this.camera.position); this.moon.visible = daylight < .4;
     for (const c of this.clouds.children) { c.position.x += dt * .13; if (c.position.x > 140) c.position.x = -55; }
     const t = performance.now() / 1000;
-    for (const a of this.animals) {
-      const walk = Math.sin(t * .2 + a.phase) > .25;
-      if (walk && !menu) {
-        const yaw = Math.sin(t * .08 + a.phase) * 3;
-        const nx = a.group.position.x - Math.sin(yaw) * dt * .32, nz = a.group.position.z - Math.cos(yaw) * dt * .32;
-        const ny = this.world.surface(nx, nz);
-        if (Math.abs(ny - a.group.position.y) <= 1 && isSolid(this.world.get(Math.floor(nx), ny - 1, Math.floor(nz))) && ny > SEA && this.world.get(Math.floor(nx), ny, Math.floor(nz)) !== B.WATER) { a.group.position.set(nx, ny, nz); a.group.rotation.y = yaw; }
-      }
-      a.legs.forEach((leg, i) => leg.rotation.x = walk ? Math.sin(t * 6 + (i % 2) * Math.PI) * .25 : 0);
-    }
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i]; p.life -= dt;
       if (p.life < 0) { this.scene.remove(p.mesh); this.particles.splice(i, 1); continue; }
@@ -276,6 +274,7 @@ export class VoxelRenderer {
     nearby.sort((a, b) => a.d - b.d);
     this.torchLights.forEach((light, i) => { const p = nearby[i]; light.intensity = p ? 7 + Math.sin(t * 7 + i) * .35 : 0; if (p) light.position.set(p.x + .5, p.y + .8, p.z + .5); });
     this.flush();
+    this.mobRenderer.render(this.mobSystem, player, this.mobSystem?.clock || t);
     this.renderer.render(this.scene, this.camera);
   }
 }

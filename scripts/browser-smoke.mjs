@@ -115,6 +115,7 @@ try {
   await page.getByRole('button', { name: 'Save & return home', exact: true }).click();
   assert.equal(await page.locator('#world-select option').count(), 2);
   console.log('Creative collection, flight, and multiple independent saves passed');
+  await page.goto('about:blank');
 
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
   const phone = await mobile.newPage(); phone.on('pageerror', e => errors.push(e.message));
@@ -129,6 +130,7 @@ try {
   await phone.screenshot({ path: 'artifacts/game-mobile.png' });
   assert.equal(await phone.locator('#touch-controls').isVisible(), true);
   console.log('Mobile creation, touch controls, and crafting passed');
+  await mobile.close();
 
   const captured = await browser.newContext({ viewport: { width: 960, height: 640 } });
   const capturePage = await captured.newPage(); capturePage.on('pageerror', e => errors.push(e.message));
@@ -143,7 +145,7 @@ try {
   assert.deepEqual(errors, [], 'Browser should have no JavaScript or rendering errors');
   console.log('BROWSER SMOKE TEST PASSED');
 } catch (error) {
-  console.log('Failure state:', await page.evaluate(() => ({ target: document.querySelector('#target-label').textContent, progress: document.querySelector('#mine-progress i').style.width, paused: !document.querySelector('#pause-modal').classList.contains('hidden'), locked: !!document.pointerLockElement, save: document.querySelector('#save-status').textContent })));
+  console.log('Failure state:', await page.evaluate(() => ({ target: document.querySelector('#target-label')?.textContent, progress: document.querySelector('#mine-progress i')?.style.width, paused: !document.querySelector('#pause-modal')?.classList.contains('hidden'), locked: !!document.pointerLockElement, save: document.querySelector('#save-status')?.textContent })));
   await page.screenshot({ path: 'artifacts/failure.png' });
   throw error;
 } finally {

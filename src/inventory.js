@@ -12,8 +12,8 @@ export class Inventory {
     return inv;
   }
   count(id) { return this.slots.reduce((sum, s) => sum + (s?.id === id ? s.count : 0), 0); }
-  add(id, amount = 1) {
-    if (!ITEMS[id] || !Number.isInteger(amount) || amount < 1) return amount;
+  add(id, amount = 1, durability = null) {
+    if (!Object.hasOwn(ITEMS, id) || !Number.isInteger(amount) || amount < 1) return amount;
     let left = amount;
     const max = stackLimit(id);
     if (max > 1) for (const s of this.slots) {
@@ -21,6 +21,7 @@ export class Inventory {
     }
     for (let i = 0; i < this.slots.length && left; i++) if (!this.slots[i]) {
       const n = Math.min(left, max); this.slots[i] = freshItem(id, n); left -= n;
+      if (ITEMS[id].durability && Number.isFinite(durability)) this.slots[i].durability = Math.max(1, Math.min(ITEMS[id].durability, durability));
     }
     return left;
   }
@@ -55,7 +56,7 @@ export class Inventory {
     return result;
   }
   static validate(slots) {
-    return Array.isArray(slots) && slots.length === 36 && slots.every(s => s === null || (ITEMS[s?.id] && Number.isInteger(s.count) && s.count > 0 && s.count <= stackLimit(s.id) && (!ITEMS[s.id].durability || (Number.isFinite(s.durability) && s.durability > 0 && s.durability <= ITEMS[s.id].durability))));
+    return Array.isArray(slots) && slots.length === 36 && slots.every(s => s === null || (Object.hasOwn(ITEMS, s?.id) && Number.isInteger(s.count) && s.count > 0 && s.count <= stackLimit(s.id) && (!ITEMS[s.id].durability || (Number.isFinite(s.durability) && s.durability > 0 && s.durability <= ITEMS[s.id].durability))));
   }
 }
 
