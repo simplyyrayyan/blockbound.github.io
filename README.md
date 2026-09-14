@@ -14,6 +14,20 @@ npm run dev
 
 Open the URL printed by Vite, normally **http://localhost:5173**. `npm run build` produces a standalone static site in `dist/`; `npm run preview` serves that build.
 
+## GitHub Pages
+
+The game is published at **https://simplyyrayyan.github.io/blockbound.github.io/**.
+
+One-time setup in the repository:
+
+1. Open **Settings > Pages > Build and deployment**.
+2. Set **Source** to **GitHub Actions**.
+3. Push the deployment configuration to `main`. Under **Actions**, wait for **Deploy Blockbound to GitHub Pages** to finish. You can also select **Run workflow** to deploy again.
+
+The workflow installs locked dependencies, runs the game tests, builds with Vite, and publishes only `dist/`. Later pushes to `main` deploy automatically. Do not publish the source branch directly: GitHub Pages does not bundle the source files or install JavaScript dependencies for you.
+
+Vite uses relative asset paths, so the built JavaScript, CSS, fonts, and favicon load correctly beneath `/blockbound.github.io/`. Keep `dist/` ignored by Git; the workflow creates and uploads it.
+
 ## What's included
 
 - Deterministic 96 × 96 × 48 worlds with forests, rivers, hills, caves, coal, iron, gold, diamonds, and a safe starting clearing.
@@ -65,6 +79,19 @@ npm run test:browser
 ```
 
 Screenshots are written to `artifacts/`. The browser test uses isolated temporary browser storage, so it does not touch your own saved games.
+
+To check the production build under the same repository path as GitHub Pages (the test starts and stops its own preview server):
+
+```sh
+npm run build
+npm run test:browser -- --preview
+```
+
+To run the same gameplay checks against the deployed site:
+
+```sh
+BLOCKBOUND_URL=https://simplyyrayyan.github.io/blockbound.github.io/ npm run test:browser
+```
 
 ## Source layout
 

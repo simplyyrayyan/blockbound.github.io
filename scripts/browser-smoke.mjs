@@ -2,6 +2,10 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
+const previewBuild = process.argv.includes('--preview');
+let previewServer = null;
+const gameUrl = previewBuild ? 'http://127.0.0.1:4173/blockbound.github.io/' : process.env.BLOCKBOUND_URL || 'http://127.0.0.1:5173/';
+
 await mkdir('artifacts', { recursive: true });
 const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
@@ -12,11 +16,21 @@ await context.addInitScript(() => {
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
-page.on('response', r => { if (r.status() >= 400) console.log('HTTP error:', r.status(), r.url()); });
+page.on('response', r => { if (r.status() >= 400) errors.push(`HTTP ${r.status()}: ${r.url()}`); });
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 
 try {
-  await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle' });
+  if (previewBuild) previewServer = await (await import('vite')).preview({
+    base: '/blockbound.github.io/',
+    preview: { host: '127.0.0.1', port: 4173, strictPort: true },
+  });
+  await page.goto(gameUrl, { waitUntil: 'networkidle' });
+  if (previewBuild) {
+    const assetUrls = await page.locator('script[src], link[rel="stylesheet"], link[rel="modulepreload"], link[rel="icon"]').evaluateAll(elements => elements.map(el => el.src || el.href));
+    assert.ok(assetUrls.length >= 4);
+    for (const url of assetUrls) assert.ok(url.startsWith(gameUrl), `Asset escaped the GitHub Pages path: ${url}`);
+    console.log('Built JavaScript, CSS, and favicon resolve beneath the repository URL');
+  }
   await page.screenshot({ path: 'artifacts/home-desktop.png' });
   console.log('Home loaded', await page.title());
   await page.getByRole('button', { name: 'CREATE A WORLD' }).click();
@@ -104,7 +118,7 @@ try {
 
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
   const phone = await mobile.newPage(); phone.on('pageerror', e => errors.push(e.message));
-  await phone.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle' });
+  await phone.goto(gameUrl, { waitUntil: 'networkidle' });
   await phone.screenshot({ path: 'artifacts/home-mobile.png' });
   await phone.getByRole('button', { name: 'CREATE A WORLD' }).click();
   await phone.locator('#loading').waitFor({ state: 'hidden' });
@@ -118,7 +132,7 @@ try {
 
   const captured = await browser.newContext({ viewport: { width: 960, height: 640 } });
   const capturePage = await captured.newPage(); capturePage.on('pageerror', e => errors.push(e.message));
-  await capturePage.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle' });
+  await capturePage.goto(gameUrl, { waitUntil: 'networkidle' });
   await capturePage.getByRole('button', { name: 'CREATE A WORLD' }).click();
   await capturePage.locator('#loading').waitFor({ state: 'hidden' });
   await capturePage.mouse.move(480, 320); await capturePage.mouse.down();
@@ -135,4 +149,5 @@ try {
 } finally {
   console.log('Browser errors:', JSON.stringify(errors));
   await browser.close();
+  if (previewServer) await new Promise(resolve => previewServer.httpServer.close(resolve));
 }
