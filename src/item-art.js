@@ -3,13 +3,17 @@ import { ITEMS } from './catalog.js';
 const cache = new Map();
 const uriCache = new Map();
 let blockAtlas = null, atlasTiles = 16;
+let referenceItems = null, referenceItemMap = null;
 export function setItemAtlas(canvas, tiles) { blockAtlas = canvas; atlasTiles = tiles; cache.clear(); uriCache.clear(); }
+export function setReferenceItems(image, map) { referenceItems = image; referenceItemMap = map; cache.clear(); uriCache.clear(); }
 const shade = (hex, n) => '#' + hex.slice(1).match(/../g).map(v => Math.max(0, Math.min(255, parseInt(v, 16) + n)).toString(16).padStart(2, '0')).join('');
 export function itemImage(id) {
   if (cache.has(id)) return cache.get(id);
   const d = ITEMS[id], canvas = document.createElement('canvas'); canvas.width = canvas.height = 32;
   if (!d) return canvas;
   const ctx = canvas.getContext('2d'), c = d.color, dark = shade(c, -55), light = shade(c, 38);
+  const reference = referenceItemMap?.[id];
+  if (referenceItems && Number.isInteger(reference)) { ctx.imageSmoothingEnabled = false; ctx.drawImage(referenceItems, reference % 64 * 16, Math.floor(reference / 64) * 16, 16, 16, 0, 0, 32, 32); cache.set(id, canvas); return canvas; }
   const rect = (x, y, w, h, fill = c) => { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); };
   const poly = (points, fill) => { ctx.fillStyle = fill; ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.fill(); };
   const shape = d.shape || (d.tool ? d.tool : d.block ? 'block' : 'material');

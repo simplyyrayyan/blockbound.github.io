@@ -3,6 +3,7 @@ import { MOBS, MOB_LIST, TRADES } from './mob-catalog.js';
 import { B, ITEMS, freshItem, isSolid } from './catalog.js';
 import { SIZE, HEIGHT, SEA, clamp, hash, collides, raycast } from './world.js';
 import { Inventory } from './inventory.js';
+import { habitatFor } from './regions.js';
 
 export const MOB_LIMIT = 64;
 export const NATURAL_LIMIT = 28;
@@ -12,6 +13,7 @@ const finder = new PF.AStarFinder({ allowDiagonal: true, dontCrossCorners: true 
 const friendly = m => m.tamed || MOBS[m.type].temperament === 'guardian';
 const waterAt = (world, p) => world.get(Math.floor(p.x), Math.floor(p.y + .2), Math.floor(p.z)) === B.WATER;
 const projectileColor = { fireball: '#f6ae46', arrow: '#bca382', trident: '#77cecb', poison: '#9bbe69', poison_arrow: '#9bbe69', slow_arrow: '#91c6db', wind: '#c1ece7', beam: '#e8cb91', fangs: '#c9c8b9', dragon_breath: '#c17dd8', wither_skull: '#777b82', shulker_bullet: '#dab8df', sonic: '#6eddd4', spit: '#eae7df', snowball: '#ecf3ef' };
+const railDirections = facing => [{ x: 0, z: -1 }, { x: 1, z: 0 }, { x: 0, z: 1 }, { x: -1, z: 0 }][facing % 4];
 
 function rayBox(origin, dir, min, max) {
   let lo = 0, hi = Infinity;
@@ -71,10 +73,15 @@ export class MobSystem {
     return { ok: true, mob };
   }
   populate() {
+    if (this.world.structures?.length) for (const structure of this.world.structures) for (const spawn of structure.spawns || []) {
+      if (this.mobs.length >= MOB_LIMIT) break;
+      this.spawn(spawn.type, spawn, { structure: structure.id, natural: true });
+    }
+    if (this.world.dimension === 'end' && this.mobs.length < MOB_LIMIT) this.spawn('ender_dragon', { x: 48.5, y: 28, z: 48.5 }, { natural: true });
     for (const [type, dx, dz] of [['sheep', -3, 5], ['cow', 5, 4], ['pig', -5, 7], ['chicken', 3, 6], ['villager', -7, -5], ['wolf', -11, 5], ['horse', 10, 8], ['bee', -5, -8]]) this.spawn(type, { x: 48.5 + dx, y: 23, z: 48.5 + dz }, { natural: true });
     for (let i = 0; i < 110 && this.mobs.length < 24; i++) {
-      const x = 4 + this.roll() * (SIZE - 8), z = 4 + this.roll() * (SIZE - 8), biome = this.world.biome(x, z);
-      const candidates = MOB_LIST.filter(d => !d.boss && d.temperament !== 'hostile' && (d.habitat === biome || biome === 'water' && d.movement === 'swim'));
+      const x = 4 + this.roll() * (SIZE - 8), z = 4 + this.roll() * (SIZE - 8), biome = habitatFor(this.world, x, this.world.surface(x, z), z);
+      const candidates = MOB_LIST.filter(d => !d.boss && d.temperament !== 'hostile' && (d.habitat === biome || biome === 'water' && d.movement === 'swim' || biome === 'sulfur_caves' && d.id === 'sulfur_cube'));
       const d = candidates[Math.floor(this.roll() * candidates.length)];
       if (d) this.spawn(d.id, { x, y: this.world.surface(x, z), z }, { natural: true });
     }
@@ -89,11 +96,20 @@ export class MobSystem {
     }
     return result;
   }
-  addDrop(id, count, p, durability = null) {
+  vehicleRaycast(origin, dir, max = 6) {
+    let result = null, nearest = max;
+    const slab = (min, maxv, o, d) => Math.abs(d) < 1e-8 ? (o >= min && o <= maxv ? [0, Infinity] : null) : [Math.min((min - o) / d, (maxv - o) / d), Math.max((min - o) / d, (maxv - o) / d)];
+    for (const vehicle of this.vehicles || []) {
+      let lo = 0, hi = Infinity; for (const axis of ['x', 'y', 'z']) { const interval = slab(vehicle[axis] - .7, vehicle[axis] + .7, origin[axis], dir[axis]); if (!interval) { lo = 1; hi = 0; break; } lo = Math.max(lo, interval[0]); hi = Math.min(hi, interval[1]); }
+      if (lo <= hi && lo < nearest) { nearest = Math.max(0, lo); result = { vehicle, distance: nearest }; }
+    }
+    return result;
+  }
+  addDrop(id, count, p, durability = null, metadata = null) {
     if (!Object.hasOwn(ITEMS, id) || !Number.isInteger(count) || count < 1) return false;
-    const stack = !ITEMS[id].durability && this.drops.find(d => d.id === id && distance(d, p) < 2 && d.count + count <= 64);
+    const stack = !ITEMS[id].durability && !metadata && this.drops.find(d => d.id === id && distance(d, p) < 2 && d.count + count <= 64);
     if (stack) stack.count += count;
-    else if (this.drops.length < 256) this.drops.push({ uid: ++this.serial, id, count, x: p.x, y: p.y + .25, z: p.z, age: 0, ...(Number.isFinite(durability) ? { durability } : {}) });
+    else if (this.drops.length < 256) this.drops.push({ uid: ++this.serial, id, count, x: p.x, y: p.y + .25, z: p.z, age: 0, ...(Number.isFinite(durability) ? { durability } : {}), ...(metadata ? structuredClone(metadata) : {}) });
     else return false;
     return true;
   }
@@ -110,8 +126,10 @@ export class MobSystem {
     if (knock) this.moveGround(m, knock.x * .4, knock.z * .4);
     if (m.health > 0) return;
     this.mobs.splice(this.mobs.indexOf(m), 1);
-    for (const loot of d.drops) if (this.roll() <= loot.chance && !(m.sheared && loot.id === d.shear)) this.addDrop(loot.id, loot.min + Math.floor(this.roll() * (loot.max - loot.min + 1)), m);
+    for (const loot of d.drops) if (this.roll() <= loot.chance && !(m.sheared && loot.id === d.shear)) this.addDrop(loot.id, loot.min + Math.floor(this.roll() * (loot.max - loot.min + 1)) + (this.playerLooting || 0), m);
     if (m.saddled) this.addDrop('saddle', 1, m);
+    if (m.harnessed) this.addDrop('happy_ghast_harness', 1, m);
+    if (m.nautilusArmor) this.addDrop(m.nautilusArmor, 1, m);
     if (m.petArmor) this.addDrop('wolf_armor', 1, m);
     if (d.split && m.scale > .6) for (let i = 0; i < 2; i++) this.spawn(m.type, { x: m.x + (i ? .6 : -.6), y: m.y, z: m.z }, { scale: .5, health: 4, angry: 10 });
     if (source === 'player' || source === 'pet') this.emit('xp', { amount: d.xp });
@@ -142,6 +160,8 @@ export class MobSystem {
     const d = MOBS[m.type], item = state.inventory.slots[state.selected], id = item?.id, creative = state.mode === 'creative';
     const consume = () => { if (!creative && item) { if (item.durability) { if (--item.durability <= 0) state.inventory.slots[state.selected] = null; } else if (--item.count <= 0) state.inventory.slots[state.selected] = null; } };
     const give = (dropId, count = 1) => { const left = state.inventory.add(dropId, count); if (left) this.addDrop(dropId, left, m); };
+    if (id === 'nautilus_armor' && m.type === 'nautilus' && m.tamed) { consume(); m.nautilusArmor = id; return 'Nautilus armor equipped'; }
+    if ((id === 'harness' || id === 'happy_ghast_harness') && m.type === 'happy_ghast' && !m.harnessed && !m.baby) { consume(); m.harnessed = true; return 'Harness equipped'; }
     if (id === 'wolf_armor' && m.type === 'wolf' && m.tamed && !m.petArmor) { consume(); m.petArmor = true; return 'Wolf armor equipped'; }
     if (id === 'lead' && d.temperament !== 'hostile') { m.leashed = !m.leashed; return m.leashed ? `${d.name} is following` : 'Lead released'; }
     if (d.milk && id === 'bucket') { consume(); give('milk_bucket'); return 'Filled milk bucket'; }
@@ -161,13 +181,15 @@ export class MobSystem {
     }
     if (d.cure && id === 'golden_apple') { consume(); m.type = 'villager'; m.health = 24; m.angry = 0; return 'Zombie villager cured'; }
     if (d.barter && id === 'gold') { consume(); give(['ender_pearl', 'quartz', 'obsidian', 'gravel', 'string'].filter(i => ITEMS[i])[Math.floor(this.roll() * 4)], 2); return 'Barter complete'; }
-    if (id && (d.tame === id || d.trust === id) && !m.tamed) { consume(); m.tamed = true; m.angry = 0; m.sitting = false; m.health = d.health; return `${d.name} befriended`; }
+    if (m.type === 'sulfur_cube' && d.absorb && ITEMS[id]?.block && !['slab', 'stairs', 'wall'].some(part => ITEMS[id].name.toLowerCase().includes(part))) { if (m.absorbed) give(m.absorbed.id || m.absorbed, 1); m.absorbed = structuredClone(item); consume(); m.sitting = true; return 'Sulfur cube absorbed the block'; }
+    if (m.absorbed && id === 'shears') { give(m.absorbed.id || m.absorbed, 1); consume(); m.absorbed = null; m.sitting = false; return 'Block extracted'; }
+    if (id && (d.tame === id || d.trust === id || m.type === 'nautilus' && ['pufferfish', 'pufferfish_bucket'].includes(id)) && !m.tamed) { consume(); m.tamed = true; m.angry = 0; m.sitting = false; m.health = d.health; return `${d.name} befriended`; }
     if (id && d.breed === id && m.breedCooldown <= 0 && !m.baby) { consume(); m.love = 30; m.health = Math.min(d.health, m.health + 4); return `${d.name} is ready to breed`; }
     if (d.ride && id === 'saddle' && !m.saddled) {
       if (d.tame && !m.tamed && !creative) return `${d.name} is not tamed`;
       consume(); m.saddled = true; return 'Saddle equipped';
     }
-    if (d.ride && (m.saddled || creative || d.model === 'llama')) {
+    if (d.ride && (m.saddled || m.harnessed || creative || d.model === 'llama')) {
       if (collides(this.world, m, 1.82 + d.height * .45, Math.min(.65, d.width / 2))) return 'Not enough headroom to ride';
       Object.assign(state.player, { x: m.x, y: m.y, z: m.z, vy: 0, flying: false }); state.riding = m.uid; return `Riding ${d.name}`;
     }
@@ -276,6 +298,7 @@ export class MobSystem {
       if (!d.fireproof && this.world.get(Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)) === B.LAVA) this.hurt(m, dt * 6, 'lava');
       if (m.status && m.status.until > this.clock && m.health > 1) this.hurt(m, dt, 'poison');
       if (d.grace && dist < 6) state.effects.speed = Math.max(state.effects.speed || 0, 2);
+      if (d.poison && dist < 2.5 && m.angry > 0 && state.mode !== 'creative') this.emit('damage', { amount: .6, effect: 'poison' });
       if (d.fatigue && dist < 12 && state.mode !== 'creative') state.effects.fatigue = Math.max(state.effects.fatigue || 0, 3);
       m.produce -= dt;
       if (m.produce <= 0) {
@@ -317,6 +340,14 @@ export class MobSystem {
       }
     }
     this.updateProjectiles(dt, state);
+    for (const vehicle of this.vehicles || []) {
+      if (!Number.isFinite(vehicle.x) || vehicle.type !== 'cart' || state.vehicle === vehicle.uid) continue;
+      const floor = this.world.get(Math.floor(vehicle.x), Math.floor(vehicle.y - .2), Math.floor(vehicle.z));
+      const rail = BLOCKS[floor]?.reference?.includes('rail');
+      if (!rail) continue;
+      const dir = railDirections(vehicle.facing || 0); vehicle.x += dir.x * dt * 3; vehicle.z += dir.z * dt * 3; vehicle.y = this.world.surface(vehicle.x, vehicle.z);
+      if (vehicle.item === 'tnt_minecart' && vehicle.powered) this.explode(vehicle, 3, 16, 'player');
+    }
     for (const loot of [...this.drops]) {
       loot.age += dt;
       const below = this.world.get(Math.floor(loot.x), Math.floor(loot.y - .3), Math.floor(loot.z));
@@ -385,7 +416,7 @@ export class MobSystem {
     while (this.accumulator >= .05 && steps++ < 3) { this.tick(.05, state); this.accumulator -= .05; }
   }
   serialize() {
-    const fields = ['uid', 'type', 'x', 'y', 'z', 'yaw', 'health', 'age', 'scale', 'tamed', 'sitting', 'saddled', 'petArmor', 'sheared', 'baby', 'natural', 'produce', 'love', 'breedCooldown', 'brushCooldown', 'collectId', 'leashed'];
+    const fields = ['uid', 'type', 'x', 'y', 'z', 'yaw', 'health', 'age', 'scale', 'tamed', 'sitting', 'saddled', 'harnessed', 'nautilusArmor', 'petArmor', 'sheared', 'absorbed', 'baby', 'natural', 'produce', 'love', 'breedCooldown', 'brushCooldown', 'collectId', 'leashed'];
     return { serial: this.serial, clock: this.clock, mobs: this.mobs.map(m => Object.fromEntries(fields.filter(k => m[k] !== undefined).map(k => [k, m[k]]))), drops: this.drops, crops: this.crops, projectiles: this.projectiles.filter(s => s.type === 'tnt') };
   }
   restore(saved) {

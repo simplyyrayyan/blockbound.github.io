@@ -1,7 +1,9 @@
 import { ITEMS, RECIPES, freshItem, stackLimit } from './catalog.js';
+import { insertStack, stackEqual } from './crafting.js';
+import { ENCHANTMENTS } from './expansion.js';
 
 export class Inventory {
-  constructor(slots) { this.slots = slots ? slots.map(s => s ? { ...s } : null) : Array(36).fill(null); }
+  constructor(slots) { this.slots = slots ? slots.map(s => s ? structuredClone(s) : null) : Array(36).fill(null); }
   static starter(creative = false) {
     const inv = new Inventory();
     if (creative) {
@@ -12,18 +14,11 @@ export class Inventory {
     return inv;
   }
   count(id) { return this.slots.reduce((sum, s) => sum + (s?.id === id ? s.count : 0), 0); }
-  add(id, amount = 1, durability = null) {
+  add(id, amount = 1, durability = null, metadata = null) {
     if (!Object.hasOwn(ITEMS, id) || !Number.isInteger(amount) || amount < 1) return amount;
-    let left = amount;
-    const max = stackLimit(id);
-    if (max > 1) for (const s of this.slots) {
-      if (s?.id === id && s.count < max) { const n = Math.min(left, max - s.count); s.count += n; left -= n; if (!left) return 0; }
-    }
-    for (let i = 0; i < this.slots.length && left; i++) if (!this.slots[i]) {
-      const n = Math.min(left, max); this.slots[i] = freshItem(id, n); left -= n;
-      if (ITEMS[id].durability && Number.isFinite(durability)) this.slots[i].durability = Math.max(1, Math.min(ITEMS[id].durability, durability));
-    }
-    return left;
+    const stack = { ...freshItem(id, amount), ...(metadata ? structuredClone(metadata) : {}), id, count: amount };
+    if (ITEMS[id].durability && Number.isFinite(durability)) stack.durability = Math.max(1, Math.min(ITEMS[id].durability, durability));
+    return insertStack(this.slots, stack);
   }
   remove(id, amount) {
     if (this.count(id) < amount) return false;
@@ -37,7 +32,7 @@ export class Inventory {
   move(from, to) {
     if (from === to || from < 0 || to < 0 || from >= 36 || to >= 36) return;
     const a = this.slots[from], b = this.slots[to];
-    if (a && b && a.id === b.id && stackLimit(a.id) > 1) {
+    if (a && b && stackEqual(a, b) && stackLimit(a.id) > 1) {
       const n = Math.min(a.count, stackLimit(a.id) - b.count); a.count -= n; b.count += n;
       if (!a.count) this.slots[from] = null;
     } else { this.slots[from] = b; this.slots[to] = a; }
@@ -56,8 +51,19 @@ export class Inventory {
     return result;
   }
   static validate(slots) {
-    return Array.isArray(slots) && slots.length === 36 && slots.every(s => s === null || (Object.hasOwn(ITEMS, s?.id) && Number.isInteger(s.count) && s.count > 0 && s.count <= stackLimit(s.id) && (!ITEMS[s.id].durability || (Number.isFinite(s.durability) && s.durability > 0 && s.durability <= ITEMS[s.id].durability))));
+    return Array.isArray(slots) && slots.length === 36 && slots.every(validStack);
   }
+}
+
+export function validStack(s, depth = 0) {
+  if (s === null) return true;
+  if (!s || !Object.hasOwn(ITEMS, s.id) || !Number.isInteger(s.count) || s.count < 1 || s.count > stackLimit(s.id)) return false;
+  if (ITEMS[s.id].durability && (!Number.isFinite(s.durability) || s.durability <= 0 || s.durability > ITEMS[s.id].durability)) return false;
+  if (s.enchantments && (typeof s.enchantments !== 'object' || Object.entries(s.enchantments).some(([id, level]) => !Object.hasOwn(ENCHANTMENTS, id) || !Number.isInteger(level) || level < 1 || level > ENCHANTMENTS[id].max))) return false;
+  if (s.name !== undefined && (typeof s.name !== 'string' || s.name.length > 40)) return false;
+  if (s.text !== undefined && (typeof s.text !== 'string' || s.text.length > 8000)) return false;
+  if (s.contents && (depth > 0 || !Array.isArray(s.contents) || s.contents.length > 27 || s.contents.some(item => !validStack(item, depth + 1)))) return false;
+  return true;
 }
 
 export { RECIPES };

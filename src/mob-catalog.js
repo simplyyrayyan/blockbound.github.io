@@ -12,6 +12,10 @@ const horse = { width: 1, height: 1.7, health: 30, speed: 3, ride: true, tame: '
 const trader = { health: 24, trade: true, height: 1.9, speed: 1.2 };
 
 export const MOB_LIST = [
+  species('nautilus', 'Nautilus', 'nautilus', '#c9a07c', { ...fish, height: 1, width: 1, health: 15, temperament: 'neutral', ride: true, tame: 'pufferfish', breed: 'cod', underwaterMount: true, drops: [] }),
+  species('happy_ghast', 'Happy Ghast', 'ghast', '#eeeae5', { movement: 'fly', height: 3.4, width: 3.4, health: 20, ride: true, flyingMount: true, harness: true, speed: 2.5, habitat: 'mountain', regenerate: true, drops: [] }),
+  species('sulfur_cube', 'Sulfur Cube', 'slime', '#d7c661', { height: 1, width: 1, health: 8, habitat: 'sulfur_caves', absorb: true, split: true, hop: true, drops: [], accent: '#897638' }),
+  species('pufferfish', 'Pufferfish', 'fish', '#d1b865', { ...fish, health: 3, poison: true, temperament: 'neutral', drops: [drop('pufferfish')] }),
   species('allay', 'Allay', 'fairy', '#60d9ed', { movement: 'fly', height: .7, width: .4, habitat: 'forest', collect: true, health: 20 }),
   species('armadillo', 'Armadillo', 'armadillo', '#ac826d', { health: 12, height: .65, habitat: 'desert', roll: true, brush: 'armadillo_scute', breed: 'spider_eye' }),
   species('axolotl', 'Axolotl', 'axolotl', '#efa1b8', { ...fish, health: 14, height: .5, amphibious: true, breed: 'tropical_fish', predator: true, regenerate: true }),

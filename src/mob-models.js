@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MOBS } from './mob-catalog.js';
 import { ITEMS } from './catalog.js';
+import { ReferenceMobRenderer } from './reference-mobs.js';
 
 const skinCache = new Map();
 export function mobParts(type, sheared = false) {
@@ -28,6 +29,13 @@ export function mobParts(type, sheared = false) {
     box(0, .85, .77, .09, .35, .08, c, 'tail');
   };
   switch (d.model) {
+    case 'nautilus': {
+      box(0, .55, .12, .85, .85, .75, '#c9a384');
+      for (let i = 0; i < 5; i++) box(0, .23 + i * .14, -.27, .75 - i * .12, .1, .1, i % 2 ? '#b58060' : '#e6ceaa');
+      box(0, .35, -.44, .57, .35, .35, '#e9d1b5'); eyes(.23, .43, -.63, .07);
+      for (let i = 0; i < 8; i++) box((i % 4 - 1.5) * .12, .2 + Math.floor(i / 4) * .16, -.77, .08, .08, .47, '#d7b690', 'tentacle', i);
+      break;
+    }
     case 'cow': case 'sheep': case 'pig': case 'goat': case 'hoglin': case 'ravager': case 'sniffer': {
       quadruped();
       if (d.model === 'cow') {
@@ -205,6 +213,7 @@ export function mobParts(type, sheared = false) {
 export class MobRenderer {
   constructor(scene) {
     this.scene = scene;
+    this.reference = new ReferenceMobRenderer(scene);
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
     const ctx = canvas.getContext('2d');
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const v = 215 + (x * 31 + y * 17 + x * y * 11) % 40; ctx.fillStyle = `rgb(${v},${v},${v})`; ctx.fillRect(x, y, 1, 1); }
@@ -216,6 +225,7 @@ export class MobRenderer {
     this.object = new THREE.Object3D(); this.matrix = new THREE.Matrix4(); this.parent = new THREE.Matrix4(); this.rotation = new THREE.Quaternion(); this.position = new THREE.Vector3(); this.scale = new THREE.Vector3(); this.color = new THREE.Color(); this.colors = new Map();
   }
   render(system, player, time) {
+    this.reference.render(system, player, time);
     if (!system) { this.mesh.count = this.glow.count = 0; return; }
     let index = 0, glowIndex = 0;
     const add = (x, y, z, w, h, l, color, rotation = 0, axis = 'x', glowing = false) => {
@@ -234,7 +244,7 @@ export class MobRenderer {
       const pulse = m.fuse ? 1 + Math.sin(time * 25) * .05 : 1;
       this.position.set(m.x, m.y + bounce, m.z); this.rotation.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, m.yaw); this.scale.setScalar(m.scale * pulse); this.parent.compose(this.position, this.rotation, this.scale);
       if (m.rolled) add(0, .3, 0, .7, .55, .7, d.color);
-      else for (const part of mobParts(m.type, m.sheared)) {
+      else if (!this.reference.has(m.type) || m.absorbed) for (const part of mobParts(m.type, m.sheared)) {
         let { x, y, z, w, h, l, color, motion, phase, angle } = part;
         let rotation = angle;
         if (motion === 'leg' || motion === 'arm') rotation += m.attack && motion === 'arm' ? -1.2 : moving ? Math.sin(t * 7 + phase) * .38 : 0;
@@ -251,6 +261,18 @@ export class MobRenderer {
     this.parent.identity();
     for (const loot of system.drops) { if (Math.hypot(loot.x - player.x, loot.z - player.z) > 35) continue; add(loot.x, loot.y + .2 + Math.sin(time * 2 + loot.uid) * .07, loot.z, .2, .2, .2, ITEMS[loot.id].color, time); }
     for (const shot of system.projectiles) add(shot.x, shot.y, shot.z, shot.type === 'tnt' ? .8 : .13, shot.type === 'tnt' ? .8 : .13, shot.type === 'tnt' ? .8 : .35, shot.type === 'tnt' ? Math.sin(time * 15) > 0 ? '#e9e3d4' : '#ce6155' : shot.color);
+    for (const vehicle of system.vehicles || []) {
+      if (Math.hypot(vehicle.x - player.x, vehicle.z - player.z) > 48) continue;
+      const color = vehicle.type === 'boat' ? '#9b6d47' : vehicle.item === 'tnt_minecart' ? '#d45b4f' : '#777d7a';
+      add(vehicle.x, vehicle.y + .22, vehicle.z, vehicle.type === 'boat' ? 1.25 : .85, .32, vehicle.type === 'boat' ? .78 : .85, color);
+      if (vehicle.item?.includes('chest')) add(vehicle.x, vehicle.y + .6, vehicle.z, .45, .35, .45, '#8d6244');
+      if (vehicle.item?.includes('furnace')) add(vehicle.x, vehicle.y + .58, vehicle.z, .4, .4, .4, '#505454');
+      if (vehicle.item === 'tnt_minecart') add(vehicle.x, vehicle.y + .57, vehicle.z, .58, .38, .58, Math.sin(time * 10) > 0 ? '#e9e3d4' : '#cf6154');
+    }
+    for (const decoration of system.decorations || []) {
+      if (Math.hypot(decoration.x - player.x, decoration.z - player.z) > 40) continue;
+      add(decoration.x, decoration.y, decoration.z, decoration.item === 'armor_stand' ? .28 : .55, decoration.item === 'armor_stand' ? 1.7 : .65, .08, ITEMS[decoration.content || decoration.item]?.color || '#b7835b');
+    }
     for (const crop of system.crops) {
       const h = .15 + Math.min(1, crop.age / 30) * .65;
       add(crop.x, crop.y + h / 2, crop.z, .07, h, .07, '#6e9849');

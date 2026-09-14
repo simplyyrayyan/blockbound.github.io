@@ -1,7 +1,8 @@
 import { EXTRA_BLOCKS, EXTRA_ITEMS, contentRecipes } from './content.js';
 import { MOB_LIST } from './mob-catalog.js';
+import { registerExpansion } from './expansion.js';
 
-export const B = Object.freeze({ AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, LOG: 5, LEAVES: 6, WATER: 7, COAL: 8, IRON: 9, GOLD: 10, DIAMOND: 11, PLANKS: 12, TABLE: 13, BEDROCK: 14, GLASS: 15, TORCH: 16, BRICK: 17, ...Object.fromEntries(EXTRA_BLOCKS.map(b => [b.key, b.id])) });
+export const B = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, LOG: 5, LEAVES: 6, WATER: 7, COAL: 8, IRON: 9, GOLD: 10, DIAMOND: 11, PLANKS: 12, TABLE: 13, BEDROCK: 14, GLASS: 15, TORCH: 16, BRICK: 17, ...Object.fromEntries(EXTRA_BLOCKS.map(b => [b.key, b.id])) };
 
 export const BLOCKS = [
   { name: 'Air', solid: false },
@@ -72,6 +73,8 @@ for (const b of EXTRA_BLOCKS) if (b.key !== 'LAVA') ITEMS[b.item] = { name: b.na
 for (const mob of MOB_LIST) ITEMS[`${mob.id}_spawn_egg`] = { name: `${mob.name} spawn egg`, color: mob.color, accent: mob.accent, shape: 'egg', spawn: mob.id, category: 'mobs' };
 for (const def of Object.values(ITEMS)) def.category ||= def.block ? 'blocks' : def.tool ? 'tools' : def.food ? 'food' : 'materials';
 RECIPES.push(...contentRecipes());
+registerExpansion(B, BLOCKS, ITEMS, RECIPES, MOB_LIST);
+Object.freeze(B);
 
 export const isSolid = id => id > 0 && !!BLOCKS[id] && BLOCKS[id].solid !== false;
 export const isTransparent = id => id === B.AIR || id === B.WATER || id === B.LEAVES || id === B.GLASS || id === B.TORCH || BLOCKS[id]?.transparent;

@@ -1,4 +1,6 @@
 import { B, BLOCKS, isSolid } from './catalog.js';
+import { blockBoxes, intersectBox } from './block-shapes.js';
+import { regionBiome, enrichOverworld, generateDimension } from './regions.js';
 
 export const SIZE = 96;
 export const HEIGHT = 48;
@@ -24,13 +26,17 @@ export function noise(x, z, seed) {
 const fbm = (x, z, seed) => noise(x, z, seed) * .6 + noise(x * 2, z * 2, seed + 71) * .27 + noise(x * 4, z * 4, seed + 172) * .13;
 
 export class World {
-  constructor(seed = 'cedar-valley', version = 2) {
+  constructor(seed = 'cedar-valley', version = 3, dimension = 'overworld') {
     this.version = version;
+    this.dimension = dimension;
+    this.structures = [];
     this.seed = String(seed).slice(0, 36);
     this.number = hashString(this.seed);
-    this.blocks = new Uint8Array(SIZE * SIZE * HEIGHT);
+    this.blocks = new Uint16Array(SIZE * SIZE * HEIGHT);
     this.heights = new Uint8Array(SIZE * SIZE);
     this.edits = new Map();
+    this.states = new Map();
+    this.revision = 0;
     this.dirty = new Set();
     this.spawn = { x: SIZE / 2 + .5, y: 23, z: SIZE / 2 + .5 };
   }
@@ -38,9 +44,20 @@ export class World {
   inside(x, y, z) { return x >= 0 && x < SIZE && y >= 0 && y < HEIGHT && z >= 0 && z < SIZE; }
   get(x, y, z) { return this.inside(x, y, z) ? this.blocks[this.index(x, y, z)] : B.AIR; }
   raw(x, y, z, id) { if (this.inside(x, y, z)) this.blocks[this.index(x, y, z)] = id; }
+  stateAt(x, y, z) { return this.states.get(this.index(x, y, z)) || {}; }
+  setState(x, y, z, values) {
+    if (!this.inside(x, y, z) || !this.get(x, y, z)) return false;
+    const index = this.index(x, y, z);
+    const old = this.states.get(index) || {};
+    if (Object.entries(values).every(([key, value]) => old[key] === value)) return false;
+    this.states.set(index, { ...this.states.get(index), ...values });
+    this.dirty.add(`${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`);
+    this.revision++; return true;
+  }
   set(x, y, z, id) {
     if (!this.inside(x, y, z) || y === 0 || !BLOCKS[id]) return false;
     this.raw(x, y, z, id);
+    this.states.delete(this.index(x, y, z)); this.revision++;
     this.edits.set(this.index(x, y, z), id);
     for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
       const cx = Math.floor((x + dx) / CHUNK), cz = Math.floor((z + dz) / CHUNK);
@@ -49,10 +66,11 @@ export class World {
     return true;
   }
   surface(x, z) {
-    for (let y = HEIGHT - 1; y >= 0; y--) if (isSolid(this.get(Math.floor(x), y, Math.floor(z)))) return y + 1;
+    for (let y = this.dimension === 'nether' ? HEIGHT - 9 : HEIGHT - 1; y >= 0; y--) if (isSolid(this.get(Math.floor(x), y, Math.floor(z)))) return y + 1;
     return 1;
   }
   generate() {
+    if (this.dimension !== 'overworld') return generateDimension(this);
     const seed = this.number;
     const cx = SIZE / 2, cz = SIZE / 2;
     for (let x = 0; x < SIZE; x++) for (let z = 0; z < SIZE; z++) {
@@ -107,10 +125,12 @@ export class World {
     this.tree(cx + 1, 23, cz - 4);
     this.tree(cx - 5, 23, cz - 2);
     this.spawn.y = 23;
-    if (this.version >= 2) this.enrich();
+    if (this.version === 2) this.enrich();
+    if (this.version >= 3) enrichOverworld(this);
     return this;
   }
   biome(x, z) {
+    if (this.version >= 3) return regionBiome(this, x, z);
     if (x > 73 && z < 24) return 'volcanic';
     if (x > 73 && z > 73) return 'end';
     if (x < 23 && z > 70) return 'snow';
@@ -173,6 +193,9 @@ export class World {
       this.edits.set(index, id);
     }
   }
+  applyStates(states = []) {
+    for (const [index, value] of states) if (Number.isInteger(index) && index >= SIZE * SIZE && index < this.blocks.length && value && typeof value === 'object') this.states.set(index, structuredClone(value));
+  }
 }
 
 // Voxel traversal returns the actual face hit, including the adjacent placement cell.
@@ -188,7 +211,14 @@ export function raycast(world, origin, direction, max = 6) {
   let distance = 0, normal = { x: 0, y: 0, z: 0 };
   while (distance <= max) {
     const id = world.get(cell.x, cell.y, cell.z);
-    if (id !== B.AIR && id !== B.WATER) return { ...cell, id, normal, distance, adjacent: { x: cell.x + normal.x, y: cell.y + normal.y, z: cell.z + normal.z } };
+    if (id !== B.AIR && id !== B.WATER) {
+      let intersection = null;
+      for (const box of blockBoxes(id, world.stateAt(cell.x, cell.y, cell.z))) {
+        const candidate = intersectBox(origin, direction, box, cell, max);
+        if (candidate && (!intersection || candidate.distance < intersection.distance)) intersection = candidate;
+      }
+      if (intersection) { const n = intersection.normal; return { ...cell, id, normal: n, distance: intersection.distance, adjacent: { x: cell.x + n.x, y: cell.y + n.y, z: cell.z + n.z } }; }
+    }
     const axis = next.x < next.y ? (next.x < next.z ? 'x' : 'z') : (next.y < next.z ? 'y' : 'z');
     if (!Number.isFinite(next[axis])) break;
     cell[axis] += step[axis]; distance = next[axis]; next[axis] += delta[axis];
@@ -200,7 +230,9 @@ export function raycast(world, origin, direction, max = 6) {
 export function collides(world, p, height = 1.8, radius = .29) {
   if (p.x - radius < 0 || p.z - radius < 0 || p.x + radius >= SIZE || p.z + radius >= SIZE || p.y < 0) return true;
   for (let x = Math.floor(p.x - radius); x <= Math.floor(p.x + radius); x++) for (let z = Math.floor(p.z - radius); z <= Math.floor(p.z + radius); z++) for (let y = Math.floor(p.y + .001); y <= Math.floor(p.y + height - .001); y++) {
-    if (isSolid(world.get(x, y, z))) return true;
+    for (const box of blockBoxes(world.get(x, y, z), world.stateAt(x, y, z), true)) {
+      if (p.x + radius > x + box[0] + .001 && p.x - radius < x + box[3] - .001 && p.y + height > y + box[1] + .001 && p.y < y + box[4] - .001 && p.z + radius > z + box[2] + .001 && p.z - radius < z + box[5] - .001) return true;
+    }
   }
   return false;
 }

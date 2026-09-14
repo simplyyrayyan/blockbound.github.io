@@ -1,0 +1,4 @@
+Minecraft reference artwork and sample models: Copyright Mojang AB. All rights reserved.
+Source: https://github.com/PrismarineJS/minecraft-assets (26.1), https://github.com/Mojang/bedrock-samples (736072450c26a7c67f07b1661f29d9a5ebaa14b1).
+These assets are subject to the Minecraft EULA: https://www.minecraft.net/en-us/eula
+Blockbound is an unofficial, non-affiliated fan project. The artwork is not covered by the minecraft-data MIT license.

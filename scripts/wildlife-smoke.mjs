@@ -82,8 +82,9 @@ try {
   await installSave(makeSave('sheep', 'creative', [['diamond_sword', 1]]));
   await page.keyboard.press('e');
   await page.getByRole('tab', { name: 'Mobs', exact: true }).click();
-  assert.equal(await page.locator('#palette-count').innerText(), '80 items'); assert.equal(await page.locator('#palette-grid button').count(), 45);
-  await page.locator('#palette-next').click(); assert.equal(await page.locator('#palette-grid button').count(), 35);
+  const mobCount = await page.evaluate(async () => (await import('/src/mob-catalog.js')).MOB_LIST.length);
+  assert.equal(await page.locator('#palette-count').innerText(), `${mobCount} items`); assert.equal(await page.locator('#palette-grid button').count(), 45);
+  await page.locator('#palette-next').click(); assert.equal(await page.locator('#palette-grid button').count(), mobCount - 45);
   await page.locator('#item-search').fill('Zombified Piglin'); assert.equal(await page.locator('#palette-grid button').count(), 1);
   await page.locator('#item-search').fill('creeper');
   await page.getByRole('button', { name: 'Add Creeper spawn egg', exact: true }).click({ modifiers: ['Shift'] });
@@ -95,7 +96,7 @@ try {
   await page.mouse.click(720, 480, { button: 'right' });
   await page.locator('#toast').filter({ hasText: 'Creeper spawned' }).waitFor();
   const creativeSave = await saved(); assert.ok(creativeSave.entities.mobs.some(m => m.type === 'creeper')); assert.ok(creativeSave.inventory.some(i => i?.id === 'creeper_spawn_egg'));
-  console.log('All 80 spawn eggs, search, pagination and actual Creative spawning passed');
+  console.log(`All ${mobCount} spawn eggs, search, pagination and actual Creative spawning passed`);
 
   // Separate screenshots inspect every model family without adding a debug API to the game.
   await page.evaluate(async () => {

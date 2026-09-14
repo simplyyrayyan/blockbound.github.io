@@ -22,8 +22,8 @@ const tick = (s, seconds) => { for (let i = 0; i < seconds * 20; i++) { s.elapse
 const hold = (s, id, count = 1) => { s.inventory.slots[0] = freshItem(id, count); s.selected = 0; };
 const dir = { x: 0, y: 0, z: -1 };
 
-test('all 80 requested species have eggs, detailed finite anatomy, valid drops and weapons', () => {
-  assert.deepEqual(MOB_LIST.map(m => m.name).sort(), [...requested].sort());
+test('all catalogued species have eggs, detailed finite anatomy, valid drops and weapons', () => {
+  assert.deepEqual(MOB_LIST.map(m => m.name).sort(), [...requested, 'Nautilus', 'Happy Ghast', 'Sulfur Cube', 'Pufferfish'].sort());
   for (const d of MOB_LIST) {
     assert.equal(ITEMS[`${d.id}_spawn_egg`].spawn, d.id);
     const parts = mobParts(d.id); assert.ok(parts.length >= 6, d.id);
@@ -33,7 +33,7 @@ test('all 80 requested species have eggs, detailed finite anatomy, valid drops a
     if (d.weapon) assert.ok(ITEMS[d.weapon], d.id);
   }
   assert.ok(Object.values(ITEMS).filter(d => !d.spawn).length >= 73);
-  assert.ok(BLOCKS.length < 256);
+  assert.ok(BLOCKS.length < 65536);
 });
 test('all species spawn into valid space; aquatic species require water; population is bounded', () => {
   const s = fixture();

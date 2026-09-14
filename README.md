@@ -1,6 +1,6 @@
 # Blockbound
 
-A small Minecraft-inspired browser game with original procedural textures, a first-person voxel world, and local saves. Built with Three.js and Vite; no server account or external art assets are required.
+A small Minecraft-inspired browser game with a first-person voxel world, local saves, and a bundled reference-art pipeline. Built with Three.js and Vite; the game runs entirely in the browser with no server account.
 
 ## Play locally
 
@@ -30,16 +30,20 @@ Vite uses relative asset paths, so the built JavaScript, CSS, fonts, and favicon
 
 ## Wildlife update
 
-- All **80 requested mob species**, from Allay to Zombified Piglin. Every species has a spawn egg, voxel anatomy, movement/AI, health, targeting, and a defined loot table. Species that normally have no death drops intentionally have empty loot tables.
-- **303 items total**: 223 non-egg items (200 more than the original game) and 80 spawn eggs. There are 130 recipes and 67 non-air block types, including water and lava.
+- All **84 catalogued mob species**, including the requested list plus Nautilus, Happy Ghast, Sulfur Cube, and Pufferfish. Every species has a spawn egg, voxel anatomy, movement/AI, health, targeting, and a defined loot table. Species that normally have no death drops intentionally have empty loot tables.
+- **1,663 items**, **1,041 block definitions**, and **1,742 recipes** are loaded from the local 26.1 reference catalog, including the requested tools, weapons, armor, food, potions, dyes, workstations, storage, transport, projectiles, and new Cinnabar/Sulfur blocks.
+- Three generated dimensions (Overworld, Nether, and End), biome palettes, and 22 deterministic structure types provide distinct exploration targets.
+- 43 enchantments, workstations (smelting, brewing, anvil, grindstone, smithing, stonecutting, loom, cartography, fletching, composting), redstone components, containers, vehicles, portals, and map/name/settings overlays are playable systems.
 - Swords, axes, bows, crossbows, tridents, a mace, ammunition, shields, five armor materials, turtle helmets, wolf armor, potions, food, resources, and building materials.
 - Melee and projectile combat, pickupable drops, tool and armor durability, status effects, boss health bars, a working totem of undying, and TNT.
 - Taming, following/staying, riding, breeding with baby growth, shearing, milking, brushing, villager trading, piglin bartering, fishing, planting, growth, fertilizer, and harvesting.
 - Deterministic 96 x 96 x 48 terrain with oak, birch, spruce, and cherry trees, new ores, snowy/desert/pale regions, and small volcanic and End-stone regions.
-- A reference-inspired title screen, stone-colored beveled menus, textured item icons, hearts, hunger, armor, XP, searchable/paginated Creative inventory, equipment slots, and an 80-species field journal.
+- A reference-inspired title screen, stone-colored beveled menus, locally bundled textured item icons, hearts, hunger, armor, XP, searchable/paginated Creative inventory, equipment slots, and an 84-species field journal.
 - Backward-compatible local saves, responsive menus, touch controls, and Creative flight.
 
-The six supplied reference images are left unchanged in the project root. Textures and models are original procedural artwork, not extracted Minecraft assets.
+The six supplied reference images are left unchanged in the project root. Procedural geometry remains available as a fallback when a reference model is missing.
+
+Reference-backed textures and mob samples are bundled under `public/assets/` for offline play. Their source and Minecraft EULA notice are preserved in [`public/assets/NOTICE.txt`](public/assets/NOTICE.txt); Blockbound is an unofficial, non-affiliated fan project.
 
 ## Controls
 
@@ -94,7 +98,7 @@ Start with a wooden pickaxe, three logs, dirt, and apples. Make planks, sticks, 
 
 This is a playable, simplified clone, not complete Minecraft parity. Mob families share AI and anatomical building blocks, with species-specific traits. Boss health, loot quantities, taming, breeding times, and recipes are tuned for a small map. Creaking uses health rather than a linked heart block. Evoker fangs and guardian beams use the projectile system. Goat horns and turtle scutes are brush rewards. Fishing is an immediate catch with a cooldown.
 
-Water and lava stay still; trees retain their canopies; ore drops usable materials; cooking and brewing happen at the workbench. Volcanic and End-stone areas are regions of the same map, not separate dimensions. There is no multiplayer, redstone circuitry, raid system, villager professions, or enchantment system. Bosses are available through Creative eggs; the Wither can also be summoned by using three wither skulls on soul sand. Some rare ingredients are easiest to obtain from Creative. Bedrock remains unbreakable.
+Water and lava stay still; trees retain their canopies; ore drops usable materials; cooking and brewing happen at their dedicated stations. Redstone is intentionally compact but includes power propagation, repeaters/comparators, pistons, doors, lamps, TNT, dispensers, hoppers, observers, note blocks, and sculk sensors. There is no multiplayer, raid system, or villager profession simulation. Bosses are available through Creative eggs; the Wither can also be summoned by using three wither skulls on soul sand. Some rare ingredients are easiest to obtain from Creative. Bedrock remains unbreakable.
 
 ### Performance
 
@@ -104,7 +108,7 @@ Mob models, equipment, ground loot, and projectiles share an instanced box rende
 
 Worlds are stored separately in this browser's local storage. The game saves every 20 seconds, on crafting, when paused, and when leaving. Terrain edits, inventory/durability, equipment, effects, mobs, tamed/saddled pets, dropped items, crops, lit TNT, player state, and time are restored. Clearing browser data removes saves. Saved data stays on your device.
 
-Old version-1 worlds regenerate with their original terrain algorithm before edits are applied. New worlds use the richer version-2 terrain. Existing block IDs and the browser storage prefix are retained. Create a new world to see new biomes; old worlds still support all the new items and mobs.
+Old version-1 worlds regenerate with their original terrain algorithm before edits are applied. New worlds use terrain version 3 and retain the old block IDs/storage prefix for compatibility. Create a new world to see the new dimensions, biomes, structures, and reference-backed catalog; old worlds still support the new items and mobs.
 
 ## Verify
 
@@ -113,7 +117,7 @@ npm test
 npm run build
 ```
 
-Tests cover terrain and old-save compatibility, mining, recipes, inventory transactions, all 80 species/models, spawning limits, AI, combat, projectile obstruction, drops, taming, breeding, equipment, trading, farming, and entity save roundtrips.
+Tests cover terrain and old-save compatibility, mining, recipes, inventory transactions, all 84 species/models, spawning limits, AI, combat, projectile obstruction, drops, taming, breeding, equipment, trading, farming, and entity save roundtrips. Browser smoke tests additionally cover dimensions, catalog pagination, responsive controls, and the production GitHub Pages path.
 
 For an actual browser smoke test, leave the dev server running in another terminal:
 
@@ -125,7 +129,7 @@ node scripts/wildlife-smoke.mjs
 
 Screenshots are written to `artifacts/`. The browser test uses isolated temporary browser storage, so it does not touch your own saved games.
 
-The wildlife suite runs against the dev server. It tests combat, loot pickup, trading, catalog search/pagination, actual egg spawning, mobile layouts, canvas pixels, and four model-gallery screenshots covering all 80 species. It also checks animation changes pixels and the model renderer uses a bounded number of draw calls.
+The wildlife suite runs against the dev server. It tests combat, loot pickup, trading, catalog search/pagination, actual egg spawning, mobile layouts, canvas pixels, and four model-gallery screenshots covering all 84 species. It also checks animation changes pixels and the model renderer uses a bounded number of draw calls.
 
 To check the production build under the same repository path as GitHub Pages (the test starts and stops its own preview server):
 
@@ -144,7 +148,11 @@ BLOCKBOUND_URL=https://simplyyrayyan.github.io/blockbound.github.io/ npm run tes
 
 - `game.js`: input, UI, gameplay loop, audio, and local storage integration.
 - `src/world.js`: generation, voxel storage, raycasting, and collision checks.
-- `src/catalog.js`: block definitions, tools, and recipes.
+- `src/catalog.js`: block definitions, tools, and recipes assembled from the local reference catalog.
+- `src/data/reference.json`: pinned 26.1 item, block, recipe, food, and enchantment data.
+- `src/regions.js`: dimensions, biomes, and deterministic structure placement.
+- `src/systems.js`: workstations, storage, redstone, vehicles, and machine persistence.
+- `src/extended-actions.js`: portals, buckets, dyes, potions, farming, maps, and special interactions.
 - `src/content.js`: appended block IDs, new items, equipment, and recipes.
 - `src/mob-catalog.js`: all species, stats, habitat, interactions, and loot tables.
 - `src/mobs.js`: fixed-step AI, spawning, combat/projectiles, loot, trading, and entity persistence.

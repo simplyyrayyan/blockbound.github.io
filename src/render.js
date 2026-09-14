@@ -3,8 +3,9 @@ import { B, BLOCKS, ITEMS, isTransparent } from './catalog.js';
 import { SIZE, HEIGHT, CHUNK, hash, clamp } from './world.js';
 import { MobRenderer } from './mob-models.js';
 import { itemImage, setItemAtlas } from './item-art.js';
+import { blockBoxes } from './block-shapes.js';
 
-const ATLAS_TILES = 16;
+export const ATLAS_TILES = 2 ** Math.ceil(Math.log2(Math.ceil(Math.sqrt(BLOCKS.length * 3))));
 
 const FACES = [
   { n: [1, 0, 0], v: [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]], shade: .87 },
@@ -106,8 +107,10 @@ export class VoxelRenderer {
     this.sunlight = new THREE.DirectionalLight('#fff0cf', 2.1); this.sunlight.position.set(-40, 70, 25); this.scene.add(this.sunlight);
     const atlas = makeAtlas(); this.atlas = atlas.canvas; setItemAtlas(this.atlas, ATLAS_TILES);
     this.material = new THREE.MeshLambertMaterial({ map: atlas.texture, vertexColors: true, alphaTest: .45 });
+    this.material.side = THREE.DoubleSide;
     this.waterMaterial = new THREE.MeshPhongMaterial({ map: atlas.texture, transparent: true, opacity: .66, vertexColors: true, depthWrite: false, shininess: 80, specular: '#cbe5d9' });
     this.glassMaterial = new THREE.MeshLambertMaterial({ map: atlas.texture, transparent: true, vertexColors: true, depthWrite: false });
+    this.glowMaterial = new THREE.MeshBasicMaterial({ map: atlas.texture, vertexColors: true, alphaTest: .3, side: THREE.DoubleSide });
     this.chunks = new Map(); this.particles = []; this.clouds = new THREE.Group(); this.scene.add(this.clouds);
     this.mobRenderer = new MobRenderer(this.scene); this.mobSystem = null;
     this.particleGeometry = new THREE.BoxGeometry(.09, .09, .09);
@@ -134,6 +137,28 @@ export class VoxelRenderer {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
   }
+  async loadTextures() {
+    try {
+      const image = new Image(); image.src = new URL('assets/terrain.png', document.baseURI).href; await image.decode();
+      const sample = document.createElement('canvas'); sample.width = image.width; sample.height = image.height;
+      const context = sample.getContext('2d'); context.drawImage(image, 0, 0);
+      const pixels = context.getImageData(0, 0, image.width, image.height).data, ctx = this.atlas.getContext('2d');
+      for (let tile = 0; tile < BLOCKS.length * 3; tile++) {
+        const x = tile % ATLAS_TILES * 16, y = Math.floor(tile / ATLAS_TILES) * 16;
+        let found = false;
+        for (let dy = 0; dy < 16 && !found; dy++) for (let dx = 0; dx < 16; dx++) if (pixels[((y + dy) * image.width + x + dx) * 4 + 3]) { found = true; break; }
+        if (found) { ctx.clearRect(x, y, 16, 16); ctx.drawImage(image, x, y, 16, 16, x, y, 16, 16); }
+      }
+      this.material.map.needsUpdate = true; setItemAtlas(this.atlas, ATLAS_TILES);
+    } catch (error) { console.warn('Reference texture atlas unavailable; using procedural textures.', error.message); }
+  }
+  configure(options) {
+    this.options = options;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, options.quality === 'low' ? 1 : options.quality === 'high' ? 2 : 1.5));
+    this.camera.fov = options.fov; this.camera.updateProjectionMatrix();
+    this.scene.fog.near = Math.max(12, options.renderDistance * .55); this.scene.fog.far = options.renderDistance;
+    this.resize();
+  }
   attach(world) {
     this.clearWorld(); this.world = world;
     for (let x = 0; x < SIZE / CHUNK; x++) for (let z = 0; z < SIZE / CHUNK; z++) this.rebuild(x, z);
@@ -148,14 +173,16 @@ export class VoxelRenderer {
   rebuild(cx, cz) {
     const key = `${cx},${cz}`;
     for (const mesh of this.chunks.get(key) || []) { this.scene.remove(mesh); mesh.geometry.dispose(); }
-    const buffers = Array.from({ length: 3 }, () => ({ positions: [], normals: [], uvs: [], colors: [] }));
+    const buffers = Array.from({ length: 4 }, () => ({ positions: [], normals: [], uvs: [], colors: [] }));
     for (let x = cx * CHUNK; x < (cx + 1) * CHUNK; x++) for (let z = cz * CHUNK; z < (cz + 1) * CHUNK; z++) for (let y = 0; y < HEIGHT; y++) {
       const id = this.world.get(x, y, z); if (!id) continue;
-      const buf = buffers[id === B.WATER ? 1 : id === B.GLASS ? 2 : 0];
-      for (let f = 0; f < 6; f++) {
+      const def = BLOCKS[id], state = this.world.stateAt(x, y, z);
+      const lit = def.light > 0 && (!def.reference?.includes('copper_bulb') || state.lit);
+      const buf = buffers[id === B.WATER ? 1 : /glass|ice/.test(def.reference || '') ? 2 : lit ? 3 : 0];
+      for (const box of blockBoxes(id, state)) for (let f = 0; f < 6; f++) {
         const face = FACES[f], [nx, ny, nz] = face.n;
         const neighbor = this.world.get(x + nx, y + ny, z + nz);
-        if (id !== B.TORCH && (!isTransparent(neighbor) || (neighbor === id && (id === B.WATER || id === B.GLASS || id === B.LEAVES)))) continue;
+        if ((!def.shape || def.shape === 'cube') && id !== B.TORCH && (!isTransparent(neighbor) || (neighbor === id && (id === B.WATER || id === B.GLASS || id === B.LEAVES)))) continue;
         const tile = id * 3 + (f === 2 ? 0 : f === 3 ? 2 : 1);
         const u0 = (tile % ATLAS_TILES + .001) / ATLAS_TILES, u1 = (tile % ATLAS_TILES + .999) / ATLAS_TILES;
         const v0 = 1 - (Math.floor(tile / ATLAS_TILES) + .999) / ATLAS_TILES, v1 = 1 - (Math.floor(tile / ATLAS_TILES) + .001) / ATLAS_TILES;
@@ -163,12 +190,11 @@ export class VoxelRenderer {
         const depthShade = clamp(.56 + y / 28, .6, 1);
         for (const vi of [0, 1, 2, 0, 2, 3]) {
           const v = face.v[vi];
-          let vx = v[0], vy = v[1], vz = v[2];
+          let vx = box[0] + v[0] * (box[3] - box[0]), vy = box[1] + v[1] * (box[4] - box[1]), vz = box[2] + v[2] * (box[5] - box[2]);
           if (id === B.WATER && vy === 1 && this.world.get(x, y + 1, z) !== B.WATER) vy = .86;
-          if (id === B.TORCH) { vx = .44 + vx * .12; vy *= .72; vz = .44 + vz * .12; }
           buf.positions.push(x + vx, y + vy, z + vz); buf.normals.push(nx, ny, nz); buf.uvs.push(...uv[vi]);
-          const shade = face.shade * depthShade;
-          buf.colors.push(shade, shade, shade);
+          const shade = face.shade * (lit ? 1 : depthShade);
+          if (def.shape === 'wire' && state.power) buf.colors.push(1, .2, .13); else buf.colors.push(shade, shade, shade);
         }
       }
     }
@@ -178,13 +204,13 @@ export class VoxelRenderer {
       const geom = new THREE.BufferGeometry();
       geom.setAttribute('position', new THREE.Float32BufferAttribute(buf.positions, 3)); geom.setAttribute('normal', new THREE.Float32BufferAttribute(buf.normals, 3));
       geom.setAttribute('uv', new THREE.Float32BufferAttribute(buf.uvs, 2)); geom.setAttribute('color', new THREE.Float32BufferAttribute(buf.colors, 3)); geom.computeBoundingSphere();
-      const mesh = new THREE.Mesh(geom, [this.material, this.waterMaterial, this.glassMaterial][i]); this.scene.add(mesh); meshes.push(mesh);
+      const mesh = new THREE.Mesh(geom, [this.material, this.waterMaterial, this.glassMaterial, this.glowMaterial][i]); this.scene.add(mesh); meshes.push(mesh);
     });
     this.chunks.set(key, meshes);
   }
   flush() {
-    for (const key of this.world.dirty) { const [x, z] = key.split(',').map(Number); this.rebuild(x, z); }
-    this.world.dirty.clear();
+    let count = 0;
+    for (const key of this.world.dirty) { const [x, z] = key.split(',').map(Number); this.rebuild(x, z); this.world.dirty.delete(key); if (++count >= 3) break; }
   }
   makeClouds() {
     const material = new THREE.MeshBasicMaterial({ color: '#f4f3e6', transparent: true, opacity: .78 });
@@ -202,7 +228,10 @@ export class VoxelRenderer {
     for (const child of [...this.hand.children]) { this.hand.remove(child); child.traverse(o => { o.geometry?.dispose(); if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) { if (m.map && m.map !== this.material.map) m.map.dispose(); m.dispose(); } }); }
     const def = ITEMS[id];
     const g = new THREE.Group(); this.hand.add(g);
-    if (def?.weapon || ['trident', 'mace'].includes(id)) {
+    if (def?.weapon === 'spear') {
+      this.box(.065, 1.55, .065, '#80613c', 0, .1, 0, g); this.box(.12, .32, .06, def.color, 0, .99, 0, g);
+      this.box(.075, .12, .06, '#e3e3d8', 0, 1.2, 0, g); g.rotation.z = -.32;
+    } else if (def?.weapon || ['trident', 'mace'].includes(id)) {
       this.box(.075, .42, .075, '#876748', 0, -.15, 0, g);
       this.box(.25, .06, .1, def.color, 0, .08, 0, g);
       this.box(id === 'mace' ? .26 : .1, id === 'mace' ? .24 : .48, .07, def.color, 0, .32, 0, g);
@@ -247,8 +276,12 @@ export class VoxelRenderer {
   }
   update(dt, time, player, { swing = 0, moving = false, menu = false } = {}) {
     const daylight = clamp(Math.sin((time - 6) / 24 * Math.PI * 2) * 2.3, 0, 1);
-    const sky = new THREE.Color('#202535').lerp(new THREE.Color('#8ab8e4'), daylight);
+    const dimension = this.world.dimension || 'overworld';
+    const sky = new THREE.Color(dimension === 'nether' ? '#782f25' : dimension === 'end' ? '#27202e' : '#202535');
+    if (dimension === 'overworld') sky.lerp(new THREE.Color('#8ab8e4'), daylight);
     this.scene.background.copy(sky); this.scene.fog.color.copy(sky);
+    this.clouds.visible = dimension === 'overworld' && this.options?.clouds !== false;
+    this.sun.visible = this.moon.visible = dimension === 'overworld';
     const underground = !menu && this.world.heights[Math.floor(player.z) * SIZE + Math.floor(player.x)] > player.y + 2;
     this.ambient.intensity = (.55 + daylight * .95) * (underground ? .27 : 1); this.sunlight.intensity = (.14 + daylight * 1.15) * (underground ? .12 : 1);
     const angle = (time - 6) / 24 * Math.PI * 2;
