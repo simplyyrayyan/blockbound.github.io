@@ -33,6 +33,7 @@ export const POTIONS = {
 };
 export const potionId = (type, delivery = 'drink') => delivery === 'drink' ? ({ water: 'water_bottle', healing: 'healing_potion', regeneration: 'regeneration_potion', fire_resistance: 'fire_resistance_potion', strength: 'strength_potion', swiftness: 'speed_potion', water_breathing: 'water_breathing_potion', slow_falling: 'slow_falling_potion' }[type] || `${type}_potion`) : `${delivery}_${type}_potion`;
 export const STATIONS = {
+  crafting_table: 'craft',
   furnace: 'smelt', blast_furnace: 'blast', smoker: 'smoke', stonecutter: 'stonecut', anvil: 'anvil', grindstone: 'grind',
   smithing_table: 'smith', cartography_table: 'cartography', fletching_table: 'fletch', loom: 'loom', composter: 'compost',
   brewing_stand: 'brew', enchanting_table: 'enchant', lectern: 'lectern', cauldron: 'cauldron', crafter: 'craft',
@@ -73,7 +74,8 @@ export function shapeFor(name) {
   if (/hanging_sign/.test(name)) return 'hanging_sign';
   if (name.endsWith('_sign')) return 'sign';
   if (/banner/.test(name)) return 'banner';
-  if (/torch|end_rod|candle|chain|lightning_rod/.test(name)) return 'rod';
+  if (/(^|_)torch$/.test(name)) return 'torch';
+  if (/end_rod|candle|chain|lightning_rod/.test(name)) return 'rod';
   if (/lantern/.test(name)) return 'lantern';
   if (/chest|barrel|shulker_box/.test(name)) return 'chest';
   if (name === 'hopper') return 'hopper';
@@ -203,6 +205,13 @@ export function registerExpansion(B, BLOCKS, ITEMS, RECIPES, mobs) {
     const ingredients = cells?.flat().filter(Boolean) || r.ingredients.map(canonicalItem), needs = {};
     if (!ITEMS[id] || ingredients.some(i => !ITEMS[i]) || ingredients.includes(id)) continue;
     for (const i of ingredients) needs[i] = (needs[i] || 0) + 1;
+    const existing = RECIPES.find(old => old.id === id && Object.keys(old.needs).length === Object.keys(needs).length && Object.entries(needs).every(([item, count]) => old.needs[item] === count));
+    if (existing) {
+      existing.pattern = cells ? Array.from({ length: 9 }, (_, i) => cells[Math.floor(i / 3)]?.[i % 3] || null) : [...ingredients, ...Array(9).fill(null)].slice(0, 9);
+      existing.shapeless = !cells;
+      existing.table = cells ? cells.length > 2 || cells.some(row => row.length > 2) : ingredients.length > 4;
+      continue;
+    }
     const key = `${id}:${JSON.stringify(needs)}`; if (known.has(key)) continue; known.add(key);
     const pattern = cells ? Array.from({ length: 9 }, (_, i) => cells[Math.floor(i / 3)]?.[i % 3] || null) : [...ingredients, ...Array(9).fill(null)].slice(0, 9);
     RECIPES.push({ id, count: r.count, needs, pattern, table: cells ? cells.length > 2 || cells.some(row => row.length > 2) : ingredients.length > 4, shapeless: !cells, note: '' });

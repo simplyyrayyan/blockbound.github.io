@@ -31,7 +31,7 @@ export function unequip(state, slot) {
 export function dropStack(state, index) {
   const item = state.inventory.slots[index];
   if (!item) return false;
-  const p = state.player, spot = { x: clamp(p.x - Math.sin(p.yaw) * 3, 1, SIZE - 1), y: p.y, z: clamp(p.z - Math.cos(p.yaw) * 3, 1, SIZE - 1) };
+  const p = state.player, spot = { x: state.world.bound(p.x - Math.sin(p.yaw) * 3), y: p.y, z: state.world.bound(p.z - Math.cos(p.yaw) * 3) };
   if (!state.mobs.addDrop(item.id, item.count, spot, item.durability, item)) return false;
   state.inventory.slots[index] = null; return true;
 }
@@ -57,6 +57,7 @@ export function attackMob(state, mob, direction) {
   if (state.attackCooldown > 0) return false;
   const held = state.inventory.slots[state.selected], def = ITEMS[held?.id];
   const range = Math.hypot(mob.x - state.player.x, mob.z - state.player.z);
+  if (range > (def?.reach || 3.4)) return false;
   if (def?.weapon === 'spear' && (range < 2 || range > 4.7)) return false;
   state.attackCooldown = def?.cooldown || .5;
   let damage = def?.damage || (def?.tool === 'axe' ? 5 : def?.tool ? 2 : 1);
@@ -92,6 +93,9 @@ export function useItem(state, hit, direction, entity = null) {
     return done(result.ok ? `${MOBS[def.spawn].name} spawned` : result.reason);
   }
   if (entity && !(def?.projectile || ['wind', 'fireball', 'snowball', 'potion'].includes(def?.action))) return { handled: true, result: system.interact(entity, state) };
+  if (hit && state.systems && !state.sneaking) {
+    const toggle = state.systems.toggle(hit); if (toggle.handled) return toggle;
+  }
   if (def?.armorSlot) { equip(state); return done(`${def.name} equipped`); }
   if (def?.projectile || ['wind', 'fireball', 'snowball'].includes(def?.action)) {
     if (state.attackCooldown > 0) return done('');
@@ -117,7 +121,7 @@ export function useItem(state, hit, direction, entity = null) {
     if (state.food >= 20 && !def.effect) return done('You are already full');
     state.food = Math.min(20, state.food + def.food);
     if (def.effect === 'cure') delete state.effects.poison;
-    else if (def.effect === 'chorus') { const x = clamp(p.x + (system.roll() - .5) * 12, 2, SIZE - 2), z = clamp(p.z + (system.roll() - .5) * 12, 2, SIZE - 2), y = state.world.surface(x, z); if (!collides(state.world, { x, y, z })) Object.assign(p, { x, y, z, vy: 0 }); }
+    else if (def.effect === 'chorus') { const x = state.world.bound(p.x + (system.roll() - .5) * 12), z = state.world.bound(p.z + (system.roll() - .5) * 12), y = state.world.surface(x, z); if (y > 0 && !collides(state.world, { x, y, z })) Object.assign(p, { x, y, z, vy: 0, fallDistance: 0 }); }
     else if (def.effect) applyEffect(state, def.effect, 15);
     consumeHeld(state); if (def.shape === 'bowl') give(state, 'bowl'); return done('');
   }
@@ -155,7 +159,12 @@ export function useItem(state, hit, direction, entity = null) {
       if (isSolid(id)) break;
     }
     if (!water) return done('Aim at water');
-    if (def.action === 'bucket') { consumeHeld(state); give(state, water.id === B.LAVA ? 'lava_bucket' : 'water_bucket'); state.world.set(water.x, water.y, water.z, B.AIR); }
+    if (def.action === 'bucket') {
+      const fluid = state.world.stateAt(water.x, water.y, water.z);
+      if (fluid.fluidLevel || fluid.falling) return done('A bucket needs a source block');
+      if (!state.world.set(water.x, water.y, water.z, B.AIR)) return done('Cannot collect that fluid');
+      consumeHeld(state); give(state, water.id === B.LAVA ? 'lava_bucket' : 'water_bucket');
+    }
     if (def.action === 'bottle') { if (water.id !== B.WATER) return done('Aim at water'); consumeHeld(state); give(state, 'water_bottle'); return done('Water bottle filled'); }
     if (def.action === 'fish') {
       if (state.fishingCooldown > 0) return done('The water is quiet');
@@ -168,6 +177,7 @@ export function useItem(state, hit, direction, entity = null) {
     if (!hit || !state.world.inside(hit.adjacent.x, hit.adjacent.y, hit.adjacent.z)) return done('Aim at a nearby surface');
     const a = hit.adjacent;
     if (isSolid(state.world.get(a.x, a.y, a.z))) return done('That space is occupied');
+    if (def.action === 'water' && state.world.dimension === 'nether') { consumeHeld(state); give(state, 'bucket'); return done('Water evaporates in the Nether'); }
     if (!state.world.set(a.x, a.y, a.z, def.action === 'water' ? B.WATER : B.LAVA)) return done('Cannot place fluid there');
     consumeHeld(state); give(state, 'bucket'); return done('');
   }

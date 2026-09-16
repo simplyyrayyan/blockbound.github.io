@@ -4,6 +4,7 @@ import { SIZE, HEIGHT, CHUNK, hash, clamp } from './world.js';
 import { MobRenderer } from './mob-models.js';
 import { itemImage, setItemAtlas } from './item-art.js';
 import { blockBoxes } from './block-shapes.js';
+import { buildChunkMesh } from './chunk-mesh.js';
 
 export const ATLAS_TILES = 2 ** Math.ceil(Math.log2(Math.ceil(Math.sqrt(BLOCKS.length * 3))));
 
@@ -16,7 +17,11 @@ const FACES = [
   { n: [0, 0, -1], v: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]], shade: .82 },
 ];
 
+const colorCache = new Map();
 function colorVariation(hex, delta) {
+  delta = Math.round(delta * 64) / 64;
+  const key = hex + ':' + delta;
+  if (colorCache.has(key)) return colorCache.get(key);
   const c = new THREE.Color(hex);
   c.offsetHSL(0, 0, delta);
   return `#${c.getHexString()}`;
@@ -77,13 +82,23 @@ export function makeAtlas() {
       ctx.strokeStyle = '#bddee1'; ctx.strokeRect(.5, .5, 15, 15); ctx.fillStyle = '#e4f4ed'; ctx.fillRect(3, 3, 2, 1); ctx.fillRect(5, 4, 2, 1); ctx.fillRect(10, 11, 2, 1);
     }
     if (id === B.WATER) { ctx.fillStyle = 'rgba(215,242,235,.13)'; ctx.fillRect(1, 5, 6, 1); ctx.fillRect(8, 12, 6, 1); }
-    if (id === B.TORCH) { ctx.fillStyle = '#654b32'; ctx.fillRect(0, 5, 16, 11); ctx.fillStyle = '#fff3a0'; ctx.fillRect(0, 0, 16, 5); }
+    if (id === B.TORCH) {
+      ctx.clearRect(0, 0, 16, 16); ctx.fillStyle = '#654b32'; ctx.fillRect(7, 6, 2, 10); ctx.fillStyle = '#a36b35'; ctx.fillRect(6, 5, 4, 3);
+      ctx.fillStyle = '#fff3a0'; ctx.fillRect(6, 1, 4, 5); ctx.fillStyle = '#f0a33e'; ctx.fillRect(7, 0, 2, 2);
+    }
     if (['wool', 'hay', 'pumpkin', 'cactus'].includes(style)) for (let x = 1; x < 16; x += style === 'wool' ? 2 : 4) { ctx.fillStyle = colorVariation(base, -.1); ctx.fillRect(x, 0, 1, 16); }
     if (style === 'cobble' || style === 'sponge') for (let i = 0; i < 12; i++) { ctx.fillStyle = colorVariation(base, -.2); ctx.fillRect(hash(i, id, 0) * 13, hash(i, id, 1) * 13, style === 'cobble' ? 4 : 2, 2); }
     if (style === 'sculk' || style === 'glow' || style === 'lava' || style === 'crystal') for (let i = 0; i < 20; i++) { ctx.fillStyle = colorVariation(base, i % 3 === 0 ? .22 : -.15); ctx.fillRect(Math.floor(hash(i, id, 2) * 15), Math.floor(hash(i, id, 3) * 15), 2, 2); }
     if (style === 'metal') { ctx.strokeStyle = colorVariation(base, -.16); ctx.strokeRect(.5, .5, 15, 15); ctx.strokeStyle = colorVariation(base, .13); ctx.strokeRect(1.5, 1.5, 13, 13); }
     if (style === 'tnt' && side === 1) { ctx.fillStyle = '#e1dbce'; ctx.fillRect(0, 5, 16, 6); ctx.fillStyle = '#443e39'; ctx.font = 'bold 6px monospace'; ctx.fillText('TNT', 2, 10); }
     if (style === 'bookshelf') { ctx.fillStyle = '#6d553e'; ctx.fillRect(0, 1, 16, 14); for (let i = 0; i < 7; i++) { ctx.fillStyle = ['#ae5953', '#5c8783', '#b0a265'][i % 3]; ctx.fillRect(i * 2 + 1, 2 + i % 3, 1, 11 - i % 3); } }
+    if (id === B.NETHER_PORTAL || id === B.END_PORTAL) {
+      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
+        const wave = Math.sin(Math.hypot(x - 8, y - 8) * 1.2 + Math.atan2(y - 8, x - 8) * 2), fleck = hash(x, id, y, 57);
+        ctx.fillStyle = id === B.NETHER_PORTAL ? ['#351058', '#57208a', '#8239b9', '#ae63d8'][Math.min(3, Math.floor((wave + 1) * 1.9))] : fleck > .96 ? '#abddcf' : fleck > .8 ? '#203d42' : '#080d19';
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
     ctx.restore();
   }
   const texture = new THREE.CanvasTexture(canvas);
@@ -108,16 +123,17 @@ export class VoxelRenderer {
     const atlas = makeAtlas(); this.atlas = atlas.canvas; setItemAtlas(this.atlas, ATLAS_TILES);
     this.material = new THREE.MeshLambertMaterial({ map: atlas.texture, vertexColors: true, alphaTest: .45 });
     this.material.side = THREE.DoubleSide;
-    this.waterMaterial = new THREE.MeshPhongMaterial({ map: atlas.texture, transparent: true, opacity: .66, vertexColors: true, depthWrite: false, shininess: 80, specular: '#cbe5d9' });
+    this.waterMaterial = new THREE.MeshPhongMaterial({ map: atlas.texture, transparent: true, opacity: .66, vertexColors: true, depthWrite: false, side: THREE.DoubleSide, shininess: 80, specular: '#cbe5d9' });
     this.glassMaterial = new THREE.MeshLambertMaterial({ map: atlas.texture, transparent: true, vertexColors: true, depthWrite: false });
     this.glowMaterial = new THREE.MeshBasicMaterial({ map: atlas.texture, vertexColors: true, alphaTest: .3, side: THREE.DoubleSide });
-    this.chunks = new Map(); this.particles = []; this.clouds = new THREE.Group(); this.scene.add(this.clouds);
+    this.chunks = new Map(); this.chunkLights = new Map(); this.particles = []; this.clouds = new THREE.Group(); this.scene.add(this.clouds);
     this.mobRenderer = new MobRenderer(this.scene); this.mobSystem = null;
     this.particleGeometry = new THREE.BoxGeometry(.09, .09, .09);
     this.particleMaterials = BLOCKS.map(b => new THREE.MeshLambertMaterial({ color: b.color || '#ffffff' }));
     this.torchLights = Array.from({ length: 6 }, () => { const light = new THREE.PointLight('#ffbb65', 0, 11, 1.1); this.scene.add(light); return light; });
     const edgeGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.006, 1.006, 1.006));
-    this.outline = new THREE.LineSegments(edgeGeometry, new THREE.LineBasicMaterial({ color: '#e9f9b6', transparent: true, opacity: .9 }));
+    // The block cursor is intentionally invisible; the crosshair and crack overlay provide feedback without a bright edge.
+    this.outline = new THREE.LineSegments(edgeGeometry, new THREE.LineBasicMaterial({ color: '#e9f9b6', transparent: true, opacity: 0 }));
     this.outline.visible = false; this.scene.add(this.outline);
     this.cracks = Array.from({ length: 6 }, (_, level) => {
       const c = document.createElement('canvas'); c.width = c.height = 32;
@@ -144,6 +160,7 @@ export class VoxelRenderer {
       const context = sample.getContext('2d'); context.drawImage(image, 0, 0);
       const pixels = context.getImageData(0, 0, image.width, image.height).data, ctx = this.atlas.getContext('2d');
       for (let tile = 0; tile < BLOCKS.length * 3; tile++) {
+        if ([B.NETHER_PORTAL, B.END_PORTAL].includes(Math.floor(tile / 3))) continue;
         const x = tile % ATLAS_TILES * 16, y = Math.floor(tile / ATLAS_TILES) * 16;
         let found = false;
         for (let dy = 0; dy < 16 && !found; dy++) for (let dx = 0; dx < 16; dx++) if (pixels[((y + dy) * image.width + x + dx) * 4 + 3]) { found = true; break; }
@@ -159,58 +176,91 @@ export class VoxelRenderer {
     this.scene.fog.near = Math.max(12, options.renderDistance * .55); this.scene.fog.far = options.renderDistance;
     this.resize();
   }
-  attach(world) {
-    this.clearWorld(); this.world = world;
-    for (let x = 0; x < SIZE / CHUNK; x++) for (let z = 0; z < SIZE / CHUNK; z++) this.rebuild(x, z);
+  attach(world, focus = world.spawn) {
+    this.clearWorld(); this.world = world; this.startWorker();
+    if (world.streaming) { const cx = Math.floor(focus.x / CHUNK), cz = Math.floor(focus.z / CHUNK); for (let x = cx - 1; x <= cx + 1; x++) for (let z = cz - 1; z <= cz + 1; z++) this.rebuild(x, z); }
+    else for (let x = 0; x < SIZE / CHUNK; x++) for (let z = 0; z < SIZE / CHUNK; z++) this.rebuild(x, z);
   }
   clearWorld() {
     for (const meshes of this.chunks.values()) for (const mesh of meshes) { this.scene.remove(mesh); mesh.geometry.dispose(); }
-    this.chunks.clear();
+    this.chunks.clear(); this.chunkLights.clear();
     for (const p of this.particles) this.scene.remove(p.mesh);
     this.particles = [];
     this.outline.visible = this.crackMesh.visible = false;
   }
   rebuild(cx, cz) {
-    const key = `${cx},${cz}`;
+    this.installChunk(cx + ',' + cz, buildChunkMesh(this.world, cx, cz));
+  }
+  installChunk(key, { buffers, lights }) {
     for (const mesh of this.chunks.get(key) || []) { this.scene.remove(mesh); mesh.geometry.dispose(); }
-    const buffers = Array.from({ length: 4 }, () => ({ positions: [], normals: [], uvs: [], colors: [] }));
-    for (let x = cx * CHUNK; x < (cx + 1) * CHUNK; x++) for (let z = cz * CHUNK; z < (cz + 1) * CHUNK; z++) for (let y = 0; y < HEIGHT; y++) {
-      const id = this.world.get(x, y, z); if (!id) continue;
-      const def = BLOCKS[id], state = this.world.stateAt(x, y, z);
-      const lit = def.light > 0 && (!def.reference?.includes('copper_bulb') || state.lit);
-      const buf = buffers[id === B.WATER ? 1 : /glass|ice/.test(def.reference || '') ? 2 : lit ? 3 : 0];
-      for (const box of blockBoxes(id, state)) for (let f = 0; f < 6; f++) {
-        const face = FACES[f], [nx, ny, nz] = face.n;
-        const neighbor = this.world.get(x + nx, y + ny, z + nz);
-        if ((!def.shape || def.shape === 'cube') && id !== B.TORCH && (!isTransparent(neighbor) || (neighbor === id && (id === B.WATER || id === B.GLASS || id === B.LEAVES)))) continue;
-        const tile = id * 3 + (f === 2 ? 0 : f === 3 ? 2 : 1);
-        const u0 = (tile % ATLAS_TILES + .001) / ATLAS_TILES, u1 = (tile % ATLAS_TILES + .999) / ATLAS_TILES;
-        const v0 = 1 - (Math.floor(tile / ATLAS_TILES) + .999) / ATLAS_TILES, v1 = 1 - (Math.floor(tile / ATLAS_TILES) + .001) / ATLAS_TILES;
-        const uv = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
-        const depthShade = clamp(.56 + y / 28, .6, 1);
-        for (const vi of [0, 1, 2, 0, 2, 3]) {
-          const v = face.v[vi];
-          let vx = box[0] + v[0] * (box[3] - box[0]), vy = box[1] + v[1] * (box[4] - box[1]), vz = box[2] + v[2] * (box[5] - box[2]);
-          if (id === B.WATER && vy === 1 && this.world.get(x, y + 1, z) !== B.WATER) vy = .86;
-          buf.positions.push(x + vx, y + vy, z + vz); buf.normals.push(nx, ny, nz); buf.uvs.push(...uv[vi]);
-          const shade = face.shade * (lit ? 1 : depthShade);
-          if (def.shape === 'wire' && state.power) buf.colors.push(1, .2, .13); else buf.colors.push(shade, shade, shade);
-        }
-      }
-    }
     const meshes = [];
     buffers.forEach((buf, i) => {
       if (!buf.positions.length) return;
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.Float32BufferAttribute(buf.positions, 3)); geom.setAttribute('normal', new THREE.Float32BufferAttribute(buf.normals, 3));
-      geom.setAttribute('uv', new THREE.Float32BufferAttribute(buf.uvs, 2)); geom.setAttribute('color', new THREE.Float32BufferAttribute(buf.colors, 3)); geom.computeBoundingSphere();
-      const mesh = new THREE.Mesh(geom, [this.material, this.waterMaterial, this.glassMaterial, this.glowMaterial][i]); this.scene.add(mesh); meshes.push(mesh);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(buf.positions, 3));
+      geometry.setAttribute('normal', new THREE.BufferAttribute(buf.normals, 3));
+      geometry.setAttribute('uv', new THREE.BufferAttribute(buf.uvs, 2));
+      geometry.setAttribute('color', new THREE.BufferAttribute(buf.colors, 3));
+      geometry.setIndex(new THREE.BufferAttribute(buf.indices, 1)); geometry.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geometry, [this.material, this.waterMaterial, this.glassMaterial, this.glowMaterial][i]);
+      this.scene.add(mesh); meshes.push(mesh);
     });
-    this.chunks.set(key, meshes);
+    this.chunks.set(key, meshes); this.chunkLights.set(key, lights);
+  }
+  startWorker() {
+    this.worker?.terminate(); this.worker = null; this.pendingMeshes = new Map(); this.workerBusy = false;
+    this.meshEpoch = (this.meshEpoch || 0) + 1; this.meshTicket = 0;
+    if (typeof Worker === 'undefined') return;
+    try {
+      this.worker = new Worker(new URL('./mesh-worker.js', import.meta.url), { type: 'module' });
+      this.worker.onmessage = ({ data }) => {
+        if (data.epoch !== this.meshEpoch) return;
+        this.workerBusy = false;
+        if (data.error) { console.warn('Chunk generation recovered:', data.error); this.pendingMeshes.delete(data.key); this.worker.terminate(); this.worker = null; return; }
+        const [cx, cz] = data.key.split(',').map(Number);
+        this.world.acceptChunk(cx, cz, data.blocks, data.baseStates, data.structures);
+        if (this.pendingMeshes.get(data.key) === data.ticket) {
+          if (!this.world.dirty.has(data.key)) this.installChunk(data.key, data);
+          this.pendingMeshes.delete(data.key);
+        }
+        this.lastChunkMs = data.duration;
+      };
+      this.worker.onerror = () => { this.worker?.terminate(); this.worker = null; this.workerBusy = false; this.pendingMeshes.clear(); };
+      this.worker.postMessage({ type: 'world', epoch: this.meshEpoch, seed: this.world.seed, version: this.world.version, dimension: this.world.dimension, edits: [...this.world.edits], states: [...this.world.states], farEdits: [...this.world.farEdits], farStates: [...this.world.farStates] });
+      this.world.meshChanges.clear();
+    } catch { this.worker = null; }
+  }
+  requestChunk(cx, cz) {
+    if (this.workerBusy) return false;
+    const key = cx + ',' + cz;
+    if (!this.worker) { this.rebuild(cx, cz); return true; }
+    const ticket = ++this.meshTicket; this.pendingMeshes.set(key, ticket); this.workerBusy = true;
+    const changes = [...this.world.meshChanges]; this.world.meshChanges.clear();
+    this.worker.postMessage({ type: 'mesh', epoch: this.meshEpoch, cx, cz, key, ticket, changes });
+    return true;
+  }
+  streamAround(player) {
+    if (!this.world?.streaming || !player) return;
+    const radius = clamp(Math.ceil((this.options?.renderDistance || 80) / CHUNK), 3, 8), cx = Math.floor(player.x / CHUNK), cz = Math.floor(player.z / CHUNK), pending = [];
+    for (let x = cx - radius; x <= cx + radius; x++) for (let z = cz - radius; z <= cz + radius; z++) {
+      const key = `${x},${z}`; if (Math.hypot(x - cx, z - cz) <= radius && !this.chunks.has(key)) pending.push({ x, z, distance: Math.hypot(x - cx, z - cz) });
+    }
+    pending.sort((a, b) => a.distance - b.distance);
+    if (pending.length && !this.world.dirty.size) this.requestChunk(pending[0].x, pending[0].z);
+    for (const [key, meshes] of this.chunks) {
+      const [x, z] = key.split(',').map(Number);
+      if (Math.abs(x - cx) > radius + 1 || Math.abs(z - cz) > radius + 1) {
+        for (const mesh of meshes) { this.scene.remove(mesh); mesh.geometry.dispose(); }
+        this.chunks.delete(key); this.chunkLights.delete(key);
+      }
+    }
   }
   flush() {
-    let count = 0;
-    for (const key of this.world.dirty) { const [x, z] = key.split(',').map(Number); this.rebuild(x, z); this.world.dirty.delete(key); if (++count >= 3) break; }
+    if (this.workerBusy) return;
+    for (const key of this.world.dirty) {
+      this.world.dirty.delete(key); if (!this.chunks.has(key)) continue;
+      const [cx, cz] = key.split(',').map(Number); this.requestChunk(cx, cz); break;
+    }
   }
   makeClouds() {
     const material = new THREE.MeshBasicMaterial({ color: '#f4f3e6', transparent: true, opacity: .78 });
@@ -244,6 +294,11 @@ export class VoxelRenderer {
       } else if (def.tool === 'axe') this.box(.22, .23, .08, def.color, -.07, .13, 0, g);
       else this.box(.19, .23, .06, def.color, 0, .22, 0, g);
       g.rotation.z = -.36;
+    } else if (BLOCKS[def?.block]?.shape === 'torch') {
+      this.box(.055, .42, .055, '#80522e', 0, 0, 0, g);
+      this.box(.07, .08, .07, '#f4aa2f', 0, .23, 0, g);
+      const flame = this.box(.045, .045, .045, '#fff19a', 0, .27, 0, g);
+      flame.material.emissive.set('#ffb939'); g.rotation.z = -.2;
     } else if (def?.block) {
       const mats = FACES.map((_, f) => {
         const tile = def.block * 3 + (f === 2 ? 0 : f === 3 ? 2 : 1);
@@ -268,13 +323,16 @@ export class VoxelRenderer {
     }
   }
   target(hit, progress) {
-    this.outline.visible = !!hit; this.crackMesh.visible = !!hit && progress > 0;
+    this.outline.visible = false; this.crackMesh.visible = !!hit && progress > 0;
     if (!hit) return;
     this.outline.position.set(hit.x + .5, hit.y + .5, hit.z + .5);
     this.crackMesh.position.copy(this.outline.position);
     this.crackMesh.material = this.cracks[clamp(Math.floor(progress * 6), 0, 5)];
   }
   update(dt, time, player, { swing = 0, moving = false, menu = false } = {}) {
+    if (!menu && dt > 0) { this.frameTime = (this.frameTime || dt) * .95 + dt * .05; }
+    const wantedFov = this.zoom ? 25 : this.options?.fov || 74;
+    if (Math.abs(this.camera.fov - wantedFov) > .1) { this.camera.fov += (wantedFov - this.camera.fov) * Math.min(1, dt * 14 || 1); this.camera.updateProjectionMatrix(); }
     const daylight = clamp(Math.sin((time - 6) / 24 * Math.PI * 2) * 2.3, 0, 1);
     const dimension = this.world.dimension || 'overworld';
     const sky = new THREE.Color(dimension === 'nether' ? '#782f25' : dimension === 'end' ? '#27202e' : '#202535');
@@ -282,12 +340,14 @@ export class VoxelRenderer {
     this.scene.background.copy(sky); this.scene.fog.color.copy(sky);
     this.clouds.visible = dimension === 'overworld' && this.options?.clouds !== false;
     this.sun.visible = this.moon.visible = dimension === 'overworld';
-    const underground = !menu && this.world.heights[Math.floor(player.z) * SIZE + Math.floor(player.x)] > player.y + 2;
-    this.ambient.intensity = (.55 + daylight * .95) * (underground ? .27 : 1); this.sunlight.intensity = (.14 + daylight * 1.15) * (underground ? .12 : 1);
+    this.streamAround(player);
+    const underground = !menu && this.world.heightAt(player.x, player.z) > player.y + 2;
+    this.ambient.intensity = dimension === 'nether' ? .85 : dimension === 'end' ? .65 : (.55 + daylight * .95) * (underground ? .27 : 1); this.sunlight.intensity = dimension === 'overworld' ? (.14 + daylight * 1.15) * (underground ? .12 : 1) : .2;
+    if (this.nightVision) this.ambient.intensity = Math.max(this.ambient.intensity, 1.3);
     const angle = (time - 6) / 24 * Math.PI * 2;
     this.sun.position.set(player.x - Math.cos(angle) * 62, 15 + Math.sin(angle) * 62, player.z - 55); this.sun.lookAt(this.camera.position);
-    this.sun.visible = daylight > .05; this.moon.position.set(player.x + Math.cos(angle) * 62, 15 - Math.sin(angle) * 62, player.z - 55); this.moon.lookAt(this.camera.position); this.moon.visible = daylight < .4;
-    for (const c of this.clouds.children) { c.position.x += dt * .13; if (c.position.x > 140) c.position.x = -55; }
+    this.sun.visible = dimension === 'overworld' && daylight > .05; this.moon.position.set(player.x + Math.cos(angle) * 62, 15 - Math.sin(angle) * 62, player.z - 55); this.moon.lookAt(this.camera.position); this.moon.visible = dimension === 'overworld' && daylight < .4;
+    for (const c of this.clouds.children) { c.position.x += dt * .13; if (c.position.x < player.x - 110) c.position.x += 220; if (c.position.x > player.x + 110) c.position.x -= 220; if (c.position.z < player.z - 110) c.position.z += 220; if (c.position.z > player.z + 110) c.position.z -= 220; c.position.y = this.world.version >= 5 ? 114 : 43; }
     const t = performance.now() / 1000;
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i]; p.life -= dt;
@@ -296,18 +356,19 @@ export class VoxelRenderer {
       p.mesh.scale.setScalar(Math.min(1, p.life * 3));
     }
     this.hand.visible = !menu;
-    const bob = moving ? Math.sin(t * 10) * .015 : Math.sin(t * 1.7) * .004;
+    const bob = this.options?.viewBob === false ? 0 : moving ? Math.sin(t * 10) * .015 : Math.sin(t * 1.7) * .004;
     this.hand.position.set(Math.min(.34, this.camera.aspect * .23) - Math.sin(swing * Math.PI) * .14, -.28 + bob - Math.sin(swing * Math.PI) * .09, -.53);
     this.hand.rotation.set(-Math.sin(swing * Math.PI) * .6, Math.sin(swing * Math.PI) * .3, -.08);
     const nearby = [];
-    for (const [index, id] of this.world.edits) if (id === B.TORCH) {
-      const x = index % SIZE, z = Math.floor(index / SIZE) % SIZE, y = Math.floor(index / (SIZE * SIZE));
-      const d = Math.hypot(x - player.x, y - player.y, z - player.z); if (d < 16) nearby.push({ x, y, z, d });
-    }
+    for (const lights of this.chunkLights.values()) for (const light of lights) { const d = Math.hypot(light.x - player.x, light.y - player.y, light.z - player.z); if (d < 16) nearby.push({ ...light, d }); }
     nearby.sort((a, b) => a.d - b.d);
     this.torchLights.forEach((light, i) => { const p = nearby[i]; light.intensity = p ? 7 + Math.sin(t * 7 + i) * .35 : 0; if (p) light.position.set(p.x + .5, p.y + .8, p.z + .5); });
     this.flush();
     this.mobRenderer.render(this.mobSystem, player, this.mobSystem?.clock || t);
     this.renderer.render(this.scene, this.camera);
+    if (!menu && performance.now() - (this.statsAt || 0) > 500) {
+      this.statsAt = performance.now();
+      Object.assign(this.renderer.domElement.dataset, { fps: String(Math.round(1 / (this.frameTime || 1 / 60))), chunks: String(this.chunks.size), drawCalls: String(this.renderer.info.render.calls), triangles: String(this.renderer.info.render.triangles), meshing: this.worker ? 'worker' : 'main', mobTextures: String(this.mobRenderer.reference.templates.size) });
+    }
   }
 }

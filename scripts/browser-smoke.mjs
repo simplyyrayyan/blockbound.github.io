@@ -40,6 +40,7 @@ try {
   console.log('Spawn target:', await page.locator('#target-label').innerText());
   await page.keyboard.press('e');
   await page.getByRole('dialog', { name: 'Inventory and crafting' }).waitFor();
+  await page.locator('#recipe-book summary').click();
   await page.getByRole('button', { name: 'Craft 4 oak planks' }).click();
   assert.match(await page.locator('#recipe-ingredients').innerText(), /2\/1/);
   await page.getByRole('button', { name: 'Recipe: Crafting table', exact: true }).click();
@@ -60,13 +61,13 @@ try {
   await page.keyboard.up('ArrowDown');
   await page.keyboard.press('Digit5');
   await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
-  await page.locator('#quest-title').filter({ hasText: 'The stone age' }).waitFor();
   await page.locator('#target-label').filter({ hasText: 'Crafting table' }).waitFor();
   await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
-  await page.locator('#inventory-modal').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#table-status').innerText(), 'TABLE READY');
+  await page.locator('#station-modal').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#station-grid button').count(), 9);
+  assert.equal(await page.locator('#station-inventory button').count(), 36);
   await page.screenshot({ path: 'artifacts/workbench-desktop.png' });
-  await page.keyboard.press('e');
+  await page.getByRole('button', { name: 'Close workstation', exact: true }).click();
   console.log('Face placement and right-click workbench interaction passed');
 
   const oldCoordinates = await page.locator('#coords-label').innerText();
@@ -97,7 +98,7 @@ try {
 
   await page.getByRole('button', { name: 'Save & return home', exact: true }).click();
   await page.locator('[data-mode="creative"]').click();
-  await page.locator('#seed-input').fill('building-meadow');
+  await page.locator('#seed-input').fill('78209632');
   await page.getByRole('button', { name: 'CREATE A WORLD' }).click();
   await page.locator('#loading').waitFor({ state: 'hidden' });
   await page.keyboard.press('e');
@@ -124,6 +125,7 @@ try {
   await phone.getByRole('button', { name: 'CREATE A WORLD' }).click();
   await phone.locator('#loading').waitFor({ state: 'hidden' });
   await phone.getByRole('button', { name: 'Open inventory', exact: true }).click();
+  await phone.locator('#recipe-book summary').click();
   await phone.getByRole('button', { name: 'Craft 4 oak planks' }).click();
   await phone.screenshot({ path: 'artifacts/inventory-mobile.png' });
   await phone.getByRole('button', { name: 'Close inventory', exact: true }).click();

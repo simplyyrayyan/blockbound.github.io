@@ -1,11 +1,19 @@
 import { B, BLOCKS, isSolid } from './catalog.js';
 import { blockBoxes, intersectBox } from './block-shapes.js';
 import { regionBiome, enrichOverworld, generateDimension } from './regions.js';
+import { generateChunk, terrainColumn } from './terrain.js';
+import { tickFluids, waterHeight } from './fluids.js';
 
 export const SIZE = 96;
-export const HEIGHT = 48;
+export const HEIGHT = 128;
 export const CHUNK = 16;
 export const SEA = 12;
+export const WORLD_LIMIT = 30000000;
+export function validFarKey(key, height = HEIGHT) {
+  if (typeof key !== 'string' || !/^-?\d+,\d+,-?\d+$/.test(key)) return false;
+  const [x, y, z] = key.split(',').map(Number);
+  return [x, y, z].every(Number.isSafeInteger) && key === `${x},${y},${z}` && y > 0 && y < height && Math.abs(x) < WORLD_LIMIT && Math.abs(z) < WORLD_LIMIT && !(x >= 0 && x < SIZE && z >= 0 && z < SIZE);
+}
 export const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 export function hashString(s) {
   let h = 2166136261;
@@ -26,50 +34,153 @@ export function noise(x, z, seed) {
 const fbm = (x, z, seed) => noise(x, z, seed) * .6 + noise(x * 2, z * 2, seed + 71) * .27 + noise(x * 4, z * 4, seed + 172) * .13;
 
 export class World {
-  constructor(seed = 'cedar-valley', version = 3, dimension = 'overworld') {
+  constructor(seed = 'cedar-valley', version = 3, dimension = 'overworld', options = {}) {
     this.version = version;
     this.dimension = dimension;
+    this.height = version >= 5 ? HEIGHT : 48;
+    this.seaLevel = version >= 5 ? 48 : SEA;
     this.structures = [];
-    this.seed = String(seed).slice(0, 36);
+    this.seed = version >= 4 ? String(seed).trim().slice(0, 36) || '0' : String(seed).slice(0, 36);
     this.number = hashString(this.seed);
-    this.blocks = new Uint16Array(SIZE * SIZE * HEIGHT);
+    this.streaming = version >= 4 || !!options.streaming;
+    this.blocks = new Uint16Array(SIZE * SIZE * this.height);
     this.heights = new Uint8Array(SIZE * SIZE);
     this.edits = new Map();
     this.states = new Map();
+    this.farEdits = new Map();
+    this.farStates = new Map();
+    this.baseStates = new Map();
+    this.terrainChunks = new Map();
+    this.generatedChunks = new Set();
+    this.columnCache = new Map();
+    this.structureCache = new Map();
+    this.chunkEdits = new Map();
+    this.chunkStates = new Map();
+    this.changed = new Set();
+    this.fluidQueue = new Set();
+    this.fluidsSeeded = false;
     this.revision = 0;
     this.dirty = new Set();
+    this.meshChanges = new Map();
     this.spawn = { x: SIZE / 2 + .5, y: 23, z: SIZE / 2 + .5 };
   }
-  index(x, y, z) { return (y * SIZE + z) * SIZE + x; }
-  inside(x, y, z) { return x >= 0 && x < SIZE && y >= 0 && y < HEIGHT && z >= 0 && z < SIZE; }
-  get(x, y, z) { return this.inside(x, y, z) ? this.blocks[this.index(x, y, z)] : B.AIR; }
-  raw(x, y, z, id) { if (this.inside(x, y, z)) this.blocks[this.index(x, y, z)] = id; }
-  stateAt(x, y, z) { return this.states.get(this.index(x, y, z)) || {}; }
+  core(x, y, z) { return x >= 0 && x < SIZE && y >= 0 && y < this.height && z >= 0 && z < SIZE; }
+  index(x, y, z) { return this.core(x, y, z) ? (y * SIZE + z) * SIZE + x : this.key(x, y, z); }
+  inside(x, y, z) { return Number.isFinite(x + y + z) && y >= 0 && y < this.height && (this.streaming ? Math.abs(x) < WORLD_LIMIT && Math.abs(z) < WORLD_LIMIT : this.core(x, y, z)); }
+  position(index) { if (typeof index === 'string') { const [x, y, z] = index.split(',').map(Number); return { x, y, z }; } return { x: index % SIZE, y: Math.floor(index / (SIZE * SIZE)), z: Math.floor(index / SIZE) % SIZE }; }
+  blockAt(index) { const p = this.position(index); return this.get(p.x, p.y, p.z); }
+  bound(value, margin = 2) { return clamp(value, this.streaming ? -WORLD_LIMIT + margin : margin, this.streaming ? WORLD_LIMIT - margin : SIZE - margin); }
+  key(x, y, z) { return `${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`; }
+  ensureChunk(cx, cz) {
+    const key = `${cx},${cz}`;
+    if (this.generatedChunks.has(key) || this.version < 4 && cx >= 0 && cx < SIZE / CHUNK && cz >= 0 && cz < SIZE / CHUNK) return;
+    this.generatedChunks.add(key);
+    if (cx < 0 || cz < 0 || cx >= SIZE / CHUNK || cz >= SIZE / CHUNK) this.terrainChunks.set(key, new Uint16Array(CHUNK * CHUNK * this.height));
+    generateChunk(this, cx, cz);
+    if (this.terrainChunks.size > 256) {
+      const oldest = this.terrainChunks.keys().next().value;
+      this.terrainChunks.delete(oldest); this.generatedChunks.delete(oldest);
+      for (const index of this.baseStates.keys()) { const p = this.position(index); if (`${Math.floor(p.x / CHUNK)},${Math.floor(p.z / CHUNK)}` === oldest) this.baseStates.delete(index); }
+    }
+  }
+  heightAt(x, z) { return this.version >= 4 || !this.core(x, 1, z) ? terrainColumn(this, Math.floor(x), Math.floor(z)).h : this.heights[Math.floor(z) * SIZE + Math.floor(x)]; }
+  acceptChunk(cx, cz, blocks, states = [], structures = []) {
+    const key = cx + ',' + cz;
+    if (!this.generatedChunks.has(key)) {
+      if (cx >= 0 && cz >= 0 && cx < SIZE / CHUNK && cz < SIZE / CHUNK) {
+        for (let y = 0; y < this.height; y++) for (let z = 0; z < CHUNK; z++) {
+          const source = (y * CHUNK + z) * CHUNK, target = (y * SIZE + cz * CHUNK + z) * SIZE + cx * CHUNK;
+          this.blocks.set(blocks.subarray(source, source + CHUNK), target);
+        }
+      } else this.terrainChunks.set(key, blocks);
+      this.generatedChunks.add(key);
+      for (const [index, value] of states) { const p = this.position(index); if (!(this.core(p.x, p.y, p.z) ? this.edits : this.farEdits).has(index)) this.baseStates.set(index, value); }
+    }
+    for (const structure of structures) if (!this.structures.some(s => s.key === structure.key)) this.structures.push(structure);
+    if (this.structures.length > 512) this.structures.splice(0, this.structures.length - 512);
+    if (this.terrainChunks.size > 256) {
+      const oldest = this.terrainChunks.keys().next().value; this.terrainChunks.delete(oldest); this.generatedChunks.delete(oldest);
+      for (const index of this.baseStates.keys()) { const p = this.position(index); if (Math.floor(p.x / CHUNK) + ',' + Math.floor(p.z / CHUNK) === oldest) this.baseStates.delete(index); }
+    }
+  }
+  generatedState(x, y, z, value) {
+    const bounds = this.generationBounds;
+    if (bounds && (x < bounds.x0 || x >= bounds.x0 + CHUNK || z < bounds.z0 || z >= bounds.z0 + CHUNK)) return;
+    const key = this.index(x, y, z);
+    if ((this.core(x, y, z) ? this.edits : this.farEdits).has(key)) return;
+    this.baseStates.set(key, value); this.changed.add(key);
+  }
+  get(x, y, z) {
+    if (!this.inside(x, y, z)) return B.AIR;
+    if (this.streaming) this.ensureChunk(Math.floor(x / CHUNK), Math.floor(z / CHUNK));
+    if (this.core(x, y, z)) return this.edits.get(this.index(x, y, z)) ?? this.blocks[this.index(x, y, z)];
+    const chunk = this.terrainChunks.get(`${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`);
+    return this.farEdits.get(this.key(x, y, z)) ?? chunk?.[(y * CHUNK + (z % CHUNK + CHUNK) % CHUNK) * CHUNK + (x % CHUNK + CHUNK) % CHUNK] ?? B.AIR;
+  }
+  raw(x, y, z, id) {
+    if (!this.inside(x, y, z)) return;
+    const bounds = this.generationBounds;
+    if (bounds && (x < bounds.x0 || x >= bounds.x0 + CHUNK || z < bounds.z0 || z >= bounds.z0 + CHUNK)) return;
+    if (bounds && (BLOCKS[id]?.station || BLOCKS[id]?.redstone)) this.changed.add(this.index(x, y, z));
+    if (this.core(x, y, z)) this.blocks[this.index(x, y, z)] = id;
+    else {
+      const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
+      if (!this.terrainChunks.has(key)) this.terrainChunks.set(key, new Uint16Array(CHUNK * CHUNK * this.height));
+      this.terrainChunks.get(key)[(y * CHUNK + (z % CHUNK + CHUNK) % CHUNK) * CHUNK + (x % CHUNK + CHUNK) % CHUNK] = id;
+    }
+  }
+  stateAt(x, y, z) { const key = this.index(x, y, z); return (this.core(x, y, z) ? this.states : this.farStates).get(key) || this.baseStates.get(key) || {}; }
   setState(x, y, z, values) {
     if (!this.inside(x, y, z) || !this.get(x, y, z)) return false;
-    const index = this.index(x, y, z);
-    const old = this.states.get(index) || {};
+    const index = this.index(x, y, z), states = this.core(x, y, z) ? this.states : this.farStates, old = this.stateAt(x, y, z);
     if (Object.entries(values).every(([key, value]) => old[key] === value)) return false;
-    this.states.set(index, { ...this.states.get(index), ...values });
+    states.set(index, { ...old, ...values });
+    this.meshChanges.set(index, { ...this.meshChanges.get(index), state: states.get(index) });
+    if (values.fluidLevel !== undefined) this.queueFluid(x, y, z);
     this.dirty.add(`${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`);
+    if (x % CHUNK === 0) this.dirty.add(`${Math.floor(x / CHUNK) - 1},${Math.floor(z / CHUNK)}`);
+    if ((x % CHUNK + CHUNK) % CHUNK === CHUNK - 1) this.dirty.add(`${Math.floor(x / CHUNK) + 1},${Math.floor(z / CHUNK)}`);
+    if (z % CHUNK === 0) this.dirty.add(`${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK) - 1}`);
+    if ((z % CHUNK + CHUNK) % CHUNK === CHUNK - 1) this.dirty.add(`${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK) + 1}`);
     this.revision++; return true;
   }
   set(x, y, z, id) {
-    if (!this.inside(x, y, z) || y === 0 || !BLOCKS[id]) return false;
+    if (!this.inside(x, y, z) || y <= 0 || !BLOCKS[id] || this.get(x, y, z) === B.BEDROCK) return false;
     this.raw(x, y, z, id);
-    this.states.delete(this.index(x, y, z)); this.revision++;
-    this.edits.set(this.index(x, y, z), id);
+    const index = this.index(x, y, z), states = this.core(x, y, z) ? this.states : this.farStates;
+    states.delete(index); this.baseStates.delete(index); this.revision++;
+    (this.core(x, y, z) ? this.edits : this.farEdits).set(index, id);
+    this.meshChanges.set(index, { id, state: null });
+    this.changed.add(index); this.queueFluid(x, y, z);
     for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
       const cx = Math.floor((x + dx) / CHUNK), cz = Math.floor((z + dz) / CHUNK);
-      if (cx >= 0 && cx < SIZE / CHUNK && cz >= 0 && cz < SIZE / CHUNK) this.dirty.add(`${cx},${cz}`);
+      if (this.streaming || (cx >= 0 && cx < SIZE / CHUNK && cz >= 0 && cz < SIZE / CHUNK)) this.dirty.add(`${cx},${cz}`);
     }
     return true;
   }
   surface(x, z) {
-    for (let y = this.dimension === 'nether' ? HEIGHT - 9 : HEIGHT - 1; y >= 0; y--) if (isSolid(this.get(Math.floor(x), y, Math.floor(z)))) return y + 1;
-    return 1;
+    x = Math.floor(x); z = Math.floor(z);
+    for (let y = this.dimension === 'nether' ? Math.min(this.height - 9, this.heightAt(x, z) + 1) : this.height - 1; y >= 0; y--) if (isSolid(this.get(x, y, z))) return y + 1;
+    return this.dimension === 'end' ? 0 : 1;
   }
+  seedFluids() {
+    if (this.fluidsSeeded) return;
+    this.fluidsSeeded = true;
+    for (const key of [...this.edits.keys(), ...this.farEdits.keys()]) { const p = this.position(key); this.queueFluid(p.x, p.y, p.z); }
+  }
+  queueFluid(x, y, z) {
+    for (const [dx, dy, dz] of [[0, 0, 0], [0, -1, 0], [0, 1, 0], [-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1]]) if (this.inside(x + dx, y + dy, z + dz) && this.fluidQueue.size < 65536) this.fluidQueue.add(this.key(x + dx, y + dy, z + dz));
+  }
+  tickFluids(limit = 96, player = null) { this.seedFluids(); this.fluidTick = (this.fluidTick || 0) + 1; return tickFluids(this, limit, player); }
+  waterHeight(x, y, z) { return waterHeight(this, x, y, z); }
+  inWater(p) { const y = Math.floor(p.y); return p.y < y + waterHeight(this, Math.floor(p.x), y, Math.floor(p.z)); }
   generate() {
+    if (this.version >= 4) {
+      const lo = this.version >= 5 ? 2 : 0, hi = this.version >= 5 ? 5 : SIZE / CHUNK;
+      for (let cx = lo; cx < hi; cx++) for (let cz = lo; cz < hi; cz++) this.ensureChunk(cx, cz);
+      this.spawn.y = this.version >= 5 ? terrainColumn(this, 48, 48).h + 1 : this.dimension === 'end' ? terrainColumn(this, 48, 48).h + 1 : 23;
+      return this;
+    }
     if (this.dimension !== 'overworld') return generateDimension(this);
     const seed = this.number;
     const cx = SIZE / 2, cz = SIZE / 2;
@@ -127,9 +238,11 @@ export class World {
     this.spawn.y = 23;
     if (this.version === 2) this.enrich();
     if (this.version >= 3) enrichOverworld(this);
+    this.fluidsSeeded = false;
     return this;
   }
   biome(x, z) {
+    if (this.streaming && !this.core(x, 1, z)) return terrainColumn(this, x, z).biome;
     if (this.version >= 3) return regionBiome(this, x, z);
     if (x > 73 && z < 24) return 'volcanic';
     if (x > 73 && z > 73) return 'end';
@@ -189,8 +302,27 @@ export class World {
       if (!Array.isArray(pair)) throw new Error('Invalid saved block');
       const [index, id] = pair;
       if (!Number.isInteger(index) || index < SIZE * SIZE || index >= this.blocks.length || !Number.isInteger(id) || !BLOCKS[id]) throw new Error('Invalid saved block');
+      if (this.version >= 4 && this.blocks[index] === B.BEDROCK && id !== B.BEDROCK) throw new Error('Cannot replace bedrock');
       this.blocks[index] = id;
       this.edits.set(index, id);
+      this.baseStates.delete(index); this.changed.add(index);
+    }
+  }
+  applyFarEdits(edits = []) {
+    if (!Array.isArray(edits) || edits.length > 200000) throw new Error('Invalid streamed world');
+    for (const pair of edits) {
+      if (!Array.isArray(pair) || !validFarKey(pair[0], this.height) || !Number.isInteger(pair[1]) || !BLOCKS[pair[1]]) throw new Error('Invalid streamed block');
+      const p = this.position(pair[0]);
+      if (this.get(p.x, p.y, p.z) === B.BEDROCK) throw new Error('Cannot replace bedrock');
+      this.farEdits.set(pair[0], pair[1]);
+      this.baseStates.delete(pair[0]); this.changed.add(pair[0]);
+    }
+  }
+  applyFarStates(states = []) {
+    if (!Array.isArray(states) || states.length > 200000) throw new Error('Invalid streamed states');
+    for (const pair of states) {
+      if (!Array.isArray(pair) || !validFarKey(pair[0], this.height) || !pair[1] || typeof pair[1] !== 'object' || Array.isArray(pair[1])) throw new Error('Invalid streamed state');
+      this.farStates.set(pair[0], structuredClone(pair[1]));
     }
   }
   applyStates(states = []) {
@@ -228,7 +360,7 @@ export function raycast(world, origin, direction, max = 6) {
 }
 
 export function collides(world, p, height = 1.8, radius = .29) {
-  if (p.x - radius < 0 || p.z - radius < 0 || p.x + radius >= SIZE || p.z + radius >= SIZE || p.y < 0) return true;
+  if (!Number.isFinite(p.x + p.y + p.z) || !world.streaming && (p.x - radius < 0 || p.z - radius < 0 || p.x + radius >= SIZE || p.z + radius >= SIZE || p.y < 0) || world.streaming && (Math.abs(p.x) + radius >= WORLD_LIMIT || Math.abs(p.z) + radius >= WORLD_LIMIT)) return true;
   for (let x = Math.floor(p.x - radius); x <= Math.floor(p.x + radius); x++) for (let z = Math.floor(p.z - radius); z <= Math.floor(p.z + radius); z++) for (let y = Math.floor(p.y + .001); y <= Math.floor(p.y + height - .001); y++) {
     for (const box of blockBoxes(world.get(x, y, z), world.stateAt(x, y, z), true)) {
       if (p.x + radius > x + box[0] + .001 && p.x - radius < x + box[3] - .001 && p.y + height > y + box[1] + .001 && p.y < y + box[4] - .001 && p.z + radius > z + box[2] + .001 && p.z - radius < z + box[5] - .001) return true;

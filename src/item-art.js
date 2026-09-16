@@ -1,4 +1,4 @@
-import { ITEMS } from './catalog.js';
+import { ITEMS, BLOCKS } from './catalog.js';
 
 const cache = new Map();
 const uriCache = new Map();
@@ -16,8 +16,13 @@ export function itemImage(id) {
   if (referenceItems && Number.isInteger(reference)) { ctx.imageSmoothingEnabled = false; ctx.drawImage(referenceItems, reference % 64 * 16, Math.floor(reference / 64) * 16, 16, 16, 0, 0, 32, 32); cache.set(id, canvas); return canvas; }
   const rect = (x, y, w, h, fill = c) => { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); };
   const poly = (points, fill) => { ctx.fillStyle = fill; ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.fill(); };
-  const shape = d.shape || (d.tool ? d.tool : d.block ? 'block' : 'material');
-  if (shape === 'block') {
+  const shape = d.shape || (d.tool ? d.tool : BLOCKS[d.block]?.shape === 'torch' ? 'torch' : d.block ? 'block' : 'material');
+  if (shape === 'torch' && blockAtlas) {
+    const tile = d.block * 3 + 1;
+    ctx.imageSmoothingEnabled = false;
+    ctx.save(); ctx.translate(16, 16); ctx.rotate(Math.PI / 7);
+    ctx.drawImage(blockAtlas, tile % atlasTiles * 16 + 6, Math.floor(tile / atlasTiles) * 16 + 6, 4, 10, -4, -12, 8, 24); ctx.restore();
+  } else if (shape === 'block') {
     if (blockAtlas) {
       ctx.imageSmoothingEnabled = false;
       for (const [side, transform, tint] of [[0, [.875, .4375, -.875, .4375, 16, 2], 0], [1, [.875, .5, 0, .875, 2, 9], .1], [1, [.875, -.5, 0, .875, 16, 17], .3]]) {

@@ -47,7 +47,7 @@ export function useExtendedItem(state, hit, direction, entity, { consume, give }
     const stripped = B[`STRIPPED_${target.toUpperCase()}`];
     if (stripped && /log|wood|stem|hyphae/.test(target)) { w.set(hit.x, hit.y, hit.z, stripped); consume(); return done(''); }
     if (/copper/.test(target)) {
-      const next = target.replace(/^waxed_/, '').replace(/^oxidized_/, 'weathered_').replace(/^weathered_/, 'exposed_').replace(/^exposed_/, '');
+      const next = target.startsWith('waxed_') ? target.slice(6) : target.startsWith('oxidized_') ? target.replace('oxidized_', 'weathered_') : target.startsWith('weathered_') ? target.replace('weathered_', 'exposed_') : target.replace(/^exposed_/, '');
       if (B[next.toUpperCase()] && next !== target) { w.set(hit.x, hit.y, hit.z, B[next.toUpperCase()]); consume(); return done('Copper scraped'); }
     }
   }
@@ -91,6 +91,7 @@ export function useExtendedItem(state, hit, direction, entity, { consume, give }
     const a = hit.adjacent;
     if (isSolid(w.get(a.x, a.y, a.z))) return done('Space occupied');
     const aquatic = MOBS[def.bucketMob]?.movement === 'swim';
+    if (aquatic && w.dimension === 'nether') return done('Water evaporates in the Nether');
     if (!MOBS[def.bucketMob]) return done('This bucket has no creature');
     if (aquatic && !w.inside(a.x, a.y, a.z)) return done('Outside world');
     const old = w.get(a.x, a.y, a.z);

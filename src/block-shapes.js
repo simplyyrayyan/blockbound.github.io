@@ -23,6 +23,7 @@ export function blockBoxes(id, state = {}, collision = false) {
     case 'lever': boxes = [[.3, 0, .3, .7, .15, .7], [.43, .15, state.on ? .25 : .45, .57, .6, state.on ? .4 : .6]]; break;
     case 'pane': boxes = [[.4375, 0, 0, .5625, 1, 1], [0, 0, .4375, 1, 1, .5625]]; break;
     case 'rod': boxes = [[.4375, 0, .4375, .5625, .75, .5625]]; break;
+    case 'torch': boxes = collision ? [] : [[.4375, state.wall ? .2 : 0, state.wall ? .7 : .4375, .5625, state.wall ? .825 : .625, state.wall ? .825 : .5625]]; break;
     case 'lantern': boxes = [[.3125, 0, .3125, .6875, .5, .6875], [.43, .5, .43, .57, .7, .57]]; break;
     case 'plant': boxes = collision ? [] : [[.1, 0, .49, .9, .85, .51], [.49, 0, .1, .51, .85, .9]]; break;
     case 'ladder': boxes = collision ? [] : [[0, 0, .92, 1, 1, .96]]; break;

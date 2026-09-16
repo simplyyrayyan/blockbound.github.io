@@ -37,11 +37,11 @@ Vite uses relative asset paths, so the built JavaScript, CSS, fonts, and favicon
 - Swords, axes, bows, crossbows, tridents, a mace, ammunition, shields, five armor materials, turtle helmets, wolf armor, potions, food, resources, and building materials.
 - Melee and projectile combat, pickupable drops, tool and armor durability, status effects, boss health bars, a working totem of undying, and TNT.
 - Taming, following/staying, riding, breeding with baby growth, shearing, milking, brushing, villager trading, piglin bartering, fishing, planting, growth, fertilizer, and harvesting.
-- Deterministic 96 x 96 x 48 terrain with oak, birch, spruce, and cherry trees, new ores, snowy/desert/pale regions, and small volcanic and End-stone regions.
+- Deterministic numeric-seed terrain streams new 16 x 16 chunks as you travel, with oak, birch, spruce, and cherry trees, new ores, snowy/desert/pale regions, and volcanic/End-stone regions. Existing version-1 saves still use their original finite terrain.
 - A reference-inspired title screen, stone-colored beveled menus, locally bundled textured item icons, hearts, hunger, armor, XP, searchable/paginated Creative inventory, equipment slots, and an 84-species field journal.
 - Backward-compatible local saves, responsive menus, touch controls, and Creative flight.
 
-The six supplied reference images are left unchanged in the project root. Procedural geometry remains available as a fallback when a reference model is missing.
+The supplied reference images are left unchanged in the project root. Procedural geometry remains available as a fallback when a reference model is missing.
 
 Reference-backed textures and mob samples are bundled under `public/assets/` for offline play. Their source and Minecraft EULA notice are preserved in [`public/assets/NOTICE.txt`](public/assets/NOTICE.txt); Blockbound is an unofficial, non-affiliated fan project.
 
@@ -60,7 +60,7 @@ Reference-backed textures and mob samples are bundled under `public/assets/` for
 | Pause | Escape or pause button |
 | Creative flight | F to toggle; Space up, Shift down |
 
-Select a stack and then another slot to move or swap it. Shift-click moves a stack between your backpack and hotbar. With a stack selected, press 1–9 to put it in that hotbar slot. Crafting is selected from the recipe book and confirmed with the craft button.
+Select a stack and then another slot to move or swap it; on desktop you can also drag stacks between the backpack and the 2x2 hand-crafting grid. On touch screens, tap a stack and then tap a crafting cell. Shift-click moves a stack between your backpack and hotbar. With a stack selected, press 1–9 to put it in that hotbar slot. Crafting is selected from the recipe book and confirmed with the craft button.
 
 In Creative, open the inventory, select the Mobs tab, and search by name. Click a spawn egg to add it, or Shift-click to put it directly into the selected hotbar slot. Right-click a surface to spawn it. Aquatic mobs require nearby water; bosses need space. The same item catalog includes all new tools, food, armor, and building blocks.
 
@@ -98,7 +98,7 @@ Start with a wooden pickaxe, three logs, dirt, and apples. Make planks, sticks, 
 
 This is a playable, simplified clone, not complete Minecraft parity. Mob families share AI and anatomical building blocks, with species-specific traits. Boss health, loot quantities, taming, breeding times, and recipes are tuned for a small map. Creaking uses health rather than a linked heart block. Evoker fangs and guardian beams use the projectile system. Goat horns and turtle scutes are brush rewards. Fishing is an immediate catch with a cooldown.
 
-Water and lava stay still; trees retain their canopies; ore drops usable materials; cooking and brewing happen at their dedicated stations. Redstone is intentionally compact but includes power propagation, repeaters/comparators, pistons, doors, lamps, TNT, dispensers, hoppers, observers, note blocks, and sculk sensors. There is no multiplayer, raid system, or villager profession simulation. Bosses are available through Creative eggs; the Wither can also be summoned by using three wither skulls on soul sand. Some rare ingredients are easiest to obtain from Creative. Bedrock remains unbreakable.
+Water uses bounded source/flow levels, spreads into open cells, reacts with lava, renders lower flow surfaces, and shows an underwater oxygen meter and bubbles. Trees retain their canopies; ore drops usable materials; cooking and brewing happen at their dedicated stations. Redstone is intentionally compact but includes power propagation, repeaters/comparators, pistons, doors, lamps, TNT, dispensers, hoppers, observers, note blocks, and sculk sensors. There is no multiplayer, raid system, or villager profession simulation. Bosses are available through Creative eggs; the Wither can also be summoned by using three wither skulls on soul sand. Some rare ingredients are easiest to obtain from Creative. Bedrock remains unbreakable.
 
 ### Performance
 

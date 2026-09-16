@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
 import JSON5 from 'json5';
+import { decodeTexture } from './reference-textures.mjs';
 import { BLOCKS, ITEMS } from '../src/catalog.js';
 import { MOB_LIST } from '../src/mob-catalog.js';
 
@@ -60,6 +61,7 @@ function blockTextures(name) {
   };
   return [texture(t.top ? 'top' : t.end ? 'end' : t.up ? 'up' : 'all'), texture(t.front ? 'front' : t.side ? 'side' : t.north ? 'north' : 'all'), texture(t.bottom ? 'bottom' : t.end ? 'end' : t.down ? 'down' : 'all')];
 }
+if (!process.argv.includes('--mobs-only')) {
 const tiles = 2 ** Math.ceil(Math.log2(Math.ceil(Math.sqrt(BLOCKS.length * 3))));
 const atlas = new PNG({ width: tiles * 16, height: tiles * 16 });
 let blockCount = 0;
@@ -95,6 +97,7 @@ await writeFile(new URL('items.png', output), PNG.sync.write(itemAtlas));
 await writeFile(new URL('src/data/item-sprites.json', root), JSON.stringify(itemMap));
 console.log(`Item sprites: ${index}`);
 
+}
 const tree = await json(`https://api.github.com/repos/Mojang/bedrock-samples/git/trees/${samplesCommit}?recursive=1`);
 const geometries = new Map();
 await pool(tree.tree.filter(f => f.path.startsWith('resource_pack/models/entity/') && f.path.endsWith('.json')), async file => {
@@ -110,7 +113,7 @@ function resolveGeometry(name, depth = 0) {
   for (const b of geometry.bones) bones.set(b.name, { ...bones.get(b.name), ...b });
   return { ...inherited, ...geometry, bones: [...bones.values()] };
 }
-const clients = { horse: 'horse_v3', donkey: 'donkey_v3', mule: 'mule_v3', skeleton_horse: 'skeleton_horse_v3', zombie_horse: 'zombie_horse_v3', villager: 'villager_v2', zombie_villager: 'zombie_villager_v2', trader_llama: 'llama', snow_golem: 'snow_golem', tropical_fish: 'tropicalfish', zombified_piglin: 'zombie_pigman' };
+const clients = { horse: 'horse_v3', donkey: 'donkey_v3', mule: 'mule_v3', skeleton_horse: 'skeleton_horse_v3', zombie_horse: 'zombie_horse_v3', villager: 'villager_v2', zombie_villager: 'zombie_villager_v2', trader_llama: 'llama', snow_golem: 'snow_golem', tropical_fish: 'tropicalfish', zombified_piglin: 'zombie_pigman', evoker: 'evocation_illager' };
 await mkdir(new URL('mobs/', output), { recursive: true });
 await pool(MOB_LIST, async mob => {
   const data = await json(`${samples}entity/${clients[mob.id] || mob.id}.entity.json`);
@@ -118,9 +121,9 @@ await pool(MOB_LIST, async mob => {
   const geo = d.geometry?.default || Object.values(d.geometry || {})[0];
   const geometry = resolveGeometry(geo); if (!geometry) return;
   const skin = d.textures?.default || Object.values(d.textures || {})[0];
-  const texture = skin && await bytes(`${samples}${skin}.png`); if (!texture) return;
-  try { PNG.sync.read(texture); } catch { return; }
-  await writeFile(new URL(`mobs/${mob.id}.png`, output), texture);
+  const texture = skin && (await bytes(`${samples}${skin}.png`) || await bytes(`${samples}${skin}.tga`)); if (!texture) return;
+  let converted; try { converted = PNG.sync.write(decodeTexture(texture)); } catch { return; }
+  await writeFile(new URL(`mobs/${mob.id}.png`, output), converted);
   mobAssets[mob.id] = { width: geometry.texturewidth || 64, height: geometry.textureheight || 32, bones: geometry.bones };
 });
 await writeFile(new URL('src/data/mob-assets.json', root), JSON.stringify(mobAssets));

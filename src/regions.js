@@ -1,5 +1,6 @@
 import { B, BLOCKS, ITEMS, freshItem } from './catalog.js';
 import { SIZE, HEIGHT, SEA, hash, noise, clamp } from './world.js';
+import { terrainColumn, caveBiome } from './terrain.js';
 
 export const DIMENSIONS = ['overworld', 'nether', 'end'];
 export const OVERWORLD_BIOMES = ['plains', 'forest', 'taiga', 'jungle', 'desert', 'badlands', 'savanna', 'swamp', 'mangrove_swamp', 'mountains', 'snowy_plains', 'cherry_grove', 'pale_garden', 'old_growth_taiga', 'snowy_taiga', 'meadow', 'birch_forest', 'stony_peaks', 'flower_forest', 'frozen_river'];
@@ -17,6 +18,7 @@ export const STRUCTURE_TYPES = [
 ].map(([id, name, dimension, x, z, underground]) => ({ id, name, dimension, x, z, underground }));
 
 export function regionBiome(world, x, z, y = HEIGHT) {
+  if (world.version >= 4 || world.streaming && !world.core(x, 1, z)) return world.dimension === 'overworld' && y < 11 ? caveBiome(world, x, z) : terrainColumn(world, x, z).biome;
   if (world.dimension === 'nether') return NETHER_BIOMES[Math.min(4, Math.floor(clamp(x, 0, SIZE - 1) / SIZE * 5))];
   if (world.dimension === 'end') return Math.hypot(x - 48, z - 48) < 22 ? 'the_end' : END_BIOMES[1 + Math.floor((x + z) / 19) % 4];
   if (y < 11) return x > 35 && x < 63 && z < 33 ? 'sulfur_caves' : x < 32 && z > 67 ? 'deep_dark' : 'caves';
@@ -43,6 +45,7 @@ function treeBlocks(biome) {
   return [B[`${name}_LOG`] || B.LOG, B[`${name}_LEAVES`] || B.LEAVES];
 }
 export function enrichOverworld(world) {
+  const HEIGHT = world.height;
   for (let x = 1; x < SIZE - 1; x++) for (let z = 1; z < SIZE - 1; z++) {
     const h = world.heights[z * SIZE + x], biome = regionBiome(world, x, z), trees = treeBlocks(biome), safe = Math.hypot(x - 48, z - 48) < 10;
     for (let y = 1; y < HEIGHT - 1; y++) {
@@ -89,6 +92,7 @@ export function enrichOverworld(world) {
 function isRock(id) { return id && ![B.BEDROCK, B.WATER, B.LAVA, B.AIR].includes(id); }
 
 export function generateDimension(world) {
+  const HEIGHT = world.height;
   const nether = world.dimension === 'nether';
   for (let x = 0; x < SIZE; x++) for (let z = 0; z < SIZE; z++) {
     const biome = regionBiome(world, x, z), h = nether ? Math.floor(10 + noise(x / 18, z / 18, world.number) * 12) : Math.floor(15 + noise(x / 22, z / 22, world.number) * 8);
@@ -144,19 +148,29 @@ export function makePortal(world, x, y, z, portal = B.NETHER_PORTAL, active = tr
 function chest(world, x, y, z, loot) {
   set(world, x, y, z, B.CHEST);
   const contents = Array(27).fill(null); loot.filter(([id]) => ITEMS[id]).forEach(([id, count], i) => contents[i] = freshItem(id, count));
-  world.states.set(world.index(x, y, z), { contents });
+  world.generatedState(x, y, z, { contents });
 }
-export function generateStructures(world) {
-  world.structures = [];
-  for (const def of STRUCTURE_TYPES.filter(s => s.dimension === world.dimension)) {
-    const { id, x, z } = def, y = def.underground || clamp(world.heights[z * SIZE + x] + 1, 6, 28), s = { ...def, y, spawns: [] };
-    world.structures.push(s);
+export function generateStructures(world, candidates = null) {
+  if (!candidates) world.structures = [];
+  for (const def of candidates || STRUCTURE_TYPES.filter(s => s.dimension === world.dimension)) {
+    const { id, x, z } = def, y = def.y ?? def.underground ?? clamp(world.heights[z * SIZE + x] + 1, 6, 28), s = { ...def, x, z, y, spawns: [] };
+    if (!world.structures.some(old => old.key ? old.key === s.key : old.id === s.id)) world.structures.push(s);
+    else if (candidates) { const i = world.structures.findIndex(old => old.key === s.key); world.structures[i] = s; }
+    if (world.structures.length > 512) world.structures.shift();
+    if (candidates && !s.underground && !/ocean|shipwreck|buried/.test(id)) {
+      const radius = id === 'village' ? 10 : 8;
+      for (let dx = -radius; dx <= radius; dx++) for (let dz = -radius; dz <= radius; dz++) {
+        const h = terrainColumn(world, x + dx, z + dz).h;
+        for (let dy = h + 1; dy < y; dy++) set(world, x + dx, dy, z + dz, world.dimension === 'nether' ? B.NETHERRACK : world.dimension === 'end' ? B.END_STONE : B.DIRT);
+        for (let dy = y; dy < Math.min(world.height - 1, y + 18); dy++) set(world, x + dx, dy, z + dz, B.AIR);
+      }
+    }
     const spawns = (...types) => types.forEach((type, i) => s.spawns.push({ type, x: x + i * 2, y, z: z + 1 }));
     if (id === 'village') {
       for (const [dx, dz, wood] of [[-5, -4, B.PLANKS], [3, -4, B.BIRCH_PLANKS], [-5, 4, B.SPRUCE_PLANKS]]) {
         room(world, x + dx, y, z + dz, 6, 4, 6, wood, B.COBBLESTONE);
         set(world, x + dx + 2, y + 2, z + dz + 5, B.GLASS); set(world, x + dx + 2, y, z + dz, B.OAK_DOOR); set(world, x + dx + 2, y + 1, z + dz, B.OAK_DOOR);
-        world.states.set(world.index(x + dx + 2, y + 1, z + dz), { upper: true }); set(world, x + dx + 1, y, z + dz + 4, B.RED_BED);
+        world.generatedState(x + dx + 2, y + 1, z + dz, { upper: true }); set(world, x + dx + 1, y, z + dz + 4, B.RED_BED);
       }
       fill(world, x + 1, y - 1, z - 6, 2, 1, 17, B.DIRT_PATH); set(world, x, y, z, B.BELL); set(world, x - 4, y, z - 1, B.TABLE); set(world, x + 4, y, z - 1, B.FURNACE);
       chest(world, x - 3, y, z + 7, [['bread', 5], ['iron', 3], ['emerald', 2], ['map', 1]]); spawns('villager', 'villager', 'iron_golem');
@@ -175,7 +189,7 @@ export function generateStructures(world) {
       chest(world, x + 4, y + 6, z + 4, [['totem', 1], ['diamond_axe', 1], ['vex_armor_trim_smithing_template', 1]]); spawns('vindicator', 'evoker');
     } else if (id === 'ocean_monument' || id === 'ocean_ruins') {
       const radius = id === 'ocean_monument' ? 7 : 4;
-      fill(world, x - radius - 2, y - 2, z - radius - 2, radius * 2 + 5, 7, radius * 2 + 5, B.WATER);
+      if (!candidates) fill(world, x - radius - 2, y - 2, z - radius - 2, radius * 2 + 5, 7, radius * 2 + 5, B.WATER);
       room(world, x - radius, y, z - radius, radius * 2 + 1, 5, radius * 2 + 1, B.PRISMARINE_BRICKS, B.DARK_PRISMARINE, B.PRISMARINE);
       fill(world, x - radius + 1, y, z - radius + 1, radius * 2 - 1, 4, radius * 2 - 1, B.WATER);
       set(world, x, y + 5, z, B.SEA_LANTERN); chest(world, x + 2, y, z + 2, [['prismarine_shard', 12], ['heart_of_the_sea', 1], ['sponge', 2]]); spawns(id === 'ocean_monument' ? 'elder_guardian' : 'drowned');

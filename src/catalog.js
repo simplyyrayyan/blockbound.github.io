@@ -21,7 +21,7 @@ export const BLOCKS = [
   { name: 'Crafting table', color: '#b5834d', drop: 'table', time: 1.1, tool: 'axe' },
   { name: 'Bedrock', color: '#42494b', time: Infinity },
   { name: 'Glass', color: '#badfe0', drop: 'glass', time: .35 },
-  { name: 'Torch', color: '#f0c366', drop: 'torch', time: .12, solid: false },
+  { name: 'Torch', color: '#f0c366', drop: 'torch', time: .12, solid: false, shape: 'torch', light: 14 },
   { name: 'Stone bricks', color: '#a2a49b', drop: 'brick', time: 1.3, tool: 'pick', tier: 1 },
 ];
 

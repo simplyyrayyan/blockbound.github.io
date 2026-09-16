@@ -1,9 +1,9 @@
 import { B, BLOCKS, ITEMS, RECIPES, freshItem, isSolid } from './catalog.js';
 import { POTIONS, potionId } from './expansion.js';
 import { Inventory } from './inventory.js';
-import { insertStack, transferStack, matchCraftGrid } from './crafting.js';
+import { insertStack, transferStack, matchCraftGrid, stackData } from './crafting.js';
 import { enchantItem, enchantLevel } from './enchanting.js';
-import { SIZE, HEIGHT, clamp } from './world.js';
+import { SIZE, HEIGHT, clamp, validFarKey } from './world.js';
 import { MOBS } from './mob-catalog.js';
 
 export const SMELTING = {
@@ -15,7 +15,7 @@ const FUEL = { coal: 48, charcoal: 48, coal_block: 480, lava_bucket: 480, stick:
 const BREW = { nether_wart: 'awkward', glistering_melon_slice: 'healing', ghast_tear: 'regeneration', magma_cream: 'fire_resistance', blaze_powder: 'strength', sugar: 'swiftness', rabbit_foot: 'leaping', pufferfish: 'water_breathing', golden_carrot: 'night_vision', spider_eye: 'poison', phantom_membrane: 'slow_falling', turtle_helmet: 'turtle_master', stone: 'infestation', slime_block: 'oozing', cobweb: 'weaving', breeze_rod: 'wind_charging' };
 const directions = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
 const neighbors = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-const position = index => ({ x: index % SIZE, y: Math.floor(index / (SIZE * SIZE)), z: Math.floor(index / SIZE) % SIZE });
+const position = index => { if (typeof index === 'string') { const [x, y, z] = index.split(',').map(Number); return { x, y, z }; } return { x: index % SIZE, y: Math.floor(index / (SIZE * SIZE)), z: Math.floor(index / SIZE) % SIZE }; };
 const near = (a, b, range) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= range;
 function take(slots, i, n = 1) { if (slots[i]) { slots[i].count -= n; if (slots[i].count <= 0) slots[i] = null; } }
 function safeSlots(slots, count) { return Array.from({ length: count }, (_, i) => slots?.[i] && Inventory.validate([slots[i], ...Array(35).fill(null)]) ? structuredClone(slots[i]) : null); }
@@ -43,22 +43,23 @@ export class WorldSystems {
   constructor(world, saved = null) {
     this.world = world; this.machines = new Map(); this.active = new Map(); this.clock = 0; this.accumulator = 0; this.events = [];
     this.vehicles = []; this.decorations = []; this.clouds = []; this.serial = 0; this.revision = -1;
-    for (let index = SIZE * SIZE; index < world.blocks.length; index++) this.track(index);
+    if (world.version >= 4) for (const index of new Set([...world.changed, ...world.edits.keys(), ...world.farEdits.keys()])) this.track(index);
+    else for (let index = SIZE * SIZE; index < world.blocks.length; index++) this.track(index);
     if (saved) this.restore(saved);
   }
   track(index) {
-    const def = BLOCKS[this.world.blocks[index]];
+    const def = BLOCKS[typeof index === 'number' ? this.world.blocks[index] : this.world.blockAt(index)];
     if (def?.station || def?.container || def?.redstone || /door|gate|bulb|lamp|tnt|note_block|jukebox|beehive|bee_nest|potent_sulfur|respawn_anchor/.test(def?.reference || '')) this.active.set(index, def.reference);
     else this.active.delete(index);
   }
   machine(index, state = null) {
-    const def = BLOCKS[this.world.blocks[index]];
+    const block = this.world.blockAt(index), def = BLOCKS[block];
     if (!def || !def.station && !def.container && !['jukebox', 'beehive', 'bee_nest', 'respawn_anchor'].includes(def.reference)) return null;
-    if (this.machines.get(index)?.block !== this.world.blocks[index]) this.machines.delete(index);
+    if (this.machines.get(index)?.block !== block) this.machines.delete(index);
     if (!this.machines.has(index)) {
-      const count = ['smelt', 'blast', 'smoke'].includes(def.station) ? 3 : def.station === 'brew' ? 4 : def.container || 3;
+      const count = ['smelt', 'blast', 'smoke'].includes(def.station) ? 3 : def.station === 'brew' ? 4 : def.station === 'craft' ? 9 : def.container || 3;
       const p = position(index), initial = this.world.stateAt(p.x, p.y, p.z).contents;
-      this.machines.set(index, { block: this.world.blocks[index], type: def.reference, station: def.station, slots: safeSlots(initial, count), fuel: 0, progress: 0, output: null, status: 'Idle' });
+      this.machines.set(index, { block, type: def.reference, station: def.station, slots: safeSlots(initial, count), fuel: 0, progress: 0, output: null, status: 'Idle' });
     }
     const m = this.machines.get(index);
     if (def.reference === 'ender_chest' && state) m.slots = state.enderStorage ||= Array(27).fill(null);
@@ -108,7 +109,16 @@ export class WorldSystems {
     const m = this.machine(index, state); if (!m || !near(position(index), state.player, 7)) return { ok: false, reason: 'Workstation out of reach' };
     const a = m.slots[0], b = m.slots[1]; let result;
     const fail = reason => ({ ok: false, reason });
-    if (m.station === 'enchant') return enchantItem(state, options.itemIndex, options.enchantment);
+    if (m.station === 'enchant') {
+      if (!a) return fail('Place equipment in the first slot');
+      const inventory = new Inventory(); inventory.slots[0] = structuredClone(a);
+      if (b?.id === 'lapis') inventory.slots[1] = structuredClone(b);
+      const transaction = { ...state, inventory };
+      const applied = enchantItem(transaction, 0, options.enchantment);
+      if (!applied.ok) return applied;
+      m.slots[0] = inventory.slots[0]; m.slots[1] = inventory.slots[1]; state.xp = transaction.xp;
+      return { ok: true };
+    }
     if (m.station === 'stonecut') {
       const id = options.recipe;
       if (!a || !ITEMS[id]?.block || !RECIPES.some(r => r.id === id && Object.keys(r.needs).length === 1 && r.needs[a.id])) return fail('Select a matching stonecutting recipe');
@@ -126,11 +136,11 @@ export class WorldSystems {
       if (state.mode !== 'creative' && state.xp < 100) return fail('Requires 1 level');
     } else if (m.station === 'grind') {
       if (!a?.durability && !a?.enchantments) return fail('Add equipment');
-      result = structuredClone(a); result.enchantments = Object.fromEntries(Object.entries(a.enchantments || {}).filter(([id]) => id.endsWith('_curse')));
+      result = { ...structuredClone(a), count: 1 }; result.enchantments = Object.fromEntries(Object.entries(a.enchantments || {}).filter(([id]) => id.endsWith('_curse')));
       if (b?.id === a.id && a.durability) result.durability = Math.min(ITEMS[a.id].durability, a.durability + b.durability + 10);
     } else if (m.station === 'smith') {
       if (!a || !b) return fail('Add equipment and an ingot or trim material');
-      result = structuredClone(a);
+      result = { ...structuredClone(a), count: 1 };
       const upgraded = a.id.replace(/^diamond_/, 'netherite_');
       if (a.id.startsWith('diamond_') && b.id === 'netherite_ingot' && ITEMS[upgraded]) { result.id = upgraded; result.durability = ITEMS[upgraded].durability; }
       else if (ITEMS[a.id]?.armorSlot && ['iron', 'gold', 'copper', 'diamond', 'emerald', 'amethyst', 'redstone', 'lapis', 'quartz', 'resin_brick'].includes(b.id)) { result.trim = b.id; result.trimPattern = options.pattern || 'sentry'; }
@@ -182,6 +192,7 @@ export class WorldSystems {
     const w = this.world, levels = new Map(), queue = [], source = (index, level) => { if ((levels.get(index) || 0) < level) { levels.set(index, level); queue.push(index); } };
     for (const [index, name] of this.active) {
       const p = position(index), s = w.stateAt(p.x, p.y, p.z); let power = 0;
+      if (!near(p, state.player, 80)) continue;
       if (name === 'redstone_block') power = 15;
       if (name === 'lever' && s.on || name.endsWith('_button') && (s.until || 0) > this.clock) power = 15;
       if (/pressure_plate|tripwire/.test(name) && near({ ...p, y: p.y + .5 }, state.player, 1.25)) power = 15;
@@ -209,6 +220,7 @@ export class WorldSystems {
     }
     for (const [index, name] of this.active) {
       const p = position(index), s = w.stateAt(p.x, p.y, p.z);
+      if (!near(p, state.player, 80)) continue;
       const around = neighbors.map(([dx, dy, dz]) => levels.get(w.index(p.x + dx, p.y + dy, p.z + dz)) || 0);
       const power = name === 'redstone_wire' ? levels.get(index) || 0 : Math.max(levels.get(index) || 0, ...around), powered = power > 0, rising = powered && !s.power;
       if (name === 'repeater' || name === 'comparator') {
@@ -233,7 +245,7 @@ export class WorldSystems {
             let used = false;
             if (name === 'dispenser' && def.spawn) used = state.mobs.spawn(def.spawn, point).ok;
             else if (name === 'dispenser' && /arrow|snowball|fire_charge|egg|wind_charge/.test(item.id)) used = state.mobs.shoot(item.id === 'fire_charge' ? 'fireball' : item.id.includes('arrow') ? 'arrow' : item.id, point, { x: point.x + dir[0] * 20, y: point.y, z: point.z + dir[2] * 20 }, 'player', 4);
-            else used = state.mobs.addDrop(item.id, 1, point, item.durability);
+            else used = state.mobs.addDrop(item.id, 1, point, item.durability, { ...stackData(item), count: 1 });
             if (used) take(m.slots, slot);
           }
         }
@@ -258,18 +270,21 @@ export class WorldSystems {
   }
   tick(dt, state) {
     this.clock += dt;
-    if (this.revision !== this.world.revision) { for (const index of this.world.edits.keys()) this.track(index); this.revision = this.world.revision; }
+    for (const index of this.world.changed) this.track(index);
+    this.world.changed.clear();
     for (const [index, m] of this.machines) {
-      if (this.world.blocks[index] !== m.block) { for (const item of m.slots.filter(Boolean)) state.mobs.addDrop(item.id, item.count, position(index), item.durability, item); this.machines.delete(index); continue; }
+      if (!near(position(index), state.player, 80)) continue;
+      if (this.world.blockAt(index) !== m.block) { for (const item of [...m.slots, m.output].filter(Boolean)) state.mobs.addDrop(item.id, item.count, position(index), item.durability, item); this.machines.delete(index); continue; }
       if (['smelt', 'blast', 'smoke'].includes(m.station)) this.processFurnace(m, dt);
       if (m.station === 'brew') this.processBrewing(m, dt);
     }
     this.redstone(state);
     for (const [index, name] of this.active) if (name === 'hopper') {
       const p = position(index); if (this.world.stateAt(p.x, p.y, p.z).power) continue;
-      const own = this.machine(index, state), above = this.machine(index + SIZE * SIZE, state), below = this.machine(index - SIZE * SIZE, state);
+      if (!near(p, state.player, 80)) continue;
+      const own = this.machine(index, state), above = this.machine(this.world.index(p.x, p.y + 1, p.z), state), below = this.machine(this.world.index(p.x, p.y - 1, p.z), state);
       if (above) { const slot = ['smelt', 'blast', 'smoke'].includes(above.station) ? 2 : above.slots.findIndex(Boolean); if (slot >= 0) transferStack(above.slots, slot, own.slots, 1); }
-      else { const drop = state.mobs.drops.find(d => near(d, { x: p.x + .5, y: p.y + 1, z: p.z + .5 }, 1.1)); if (drop) { const left = insertStack(own.slots, freshItem(drop.id, 1)); if (!left && --drop.count <= 0) state.mobs.drops.splice(state.mobs.drops.indexOf(drop), 1); } }
+      else { const drop = state.mobs.drops.find(d => near(d, { x: p.x + .5, y: p.y + 1, z: p.z + .5 }, 1.1)); if (drop) { const left = insertStack(own.slots, { ...stackData(drop), count: 1 }); if (!left && --drop.count <= 0) state.mobs.drops.splice(state.mobs.drops.indexOf(drop), 1); } }
       if (below) { const slot = own.slots.findIndex(Boolean); if (slot >= 0) transferStack(own.slots, slot, below.slots, 1); }
     }
     for (const cloud of [...this.clouds]) { cloud.life -= dt; if (cloud.life <= 0) this.clouds.splice(this.clouds.indexOf(cloud), 1); else if (Math.floor(this.clock * 2) !== cloud.lastTick) { cloud.lastTick = Math.floor(this.clock * 2); this.applyAreaEffect(cloud, state); } }
@@ -281,6 +296,7 @@ export class WorldSystems {
     state.mobs.vehicles = this.vehicles; state.mobs.decorations = this.decorations; state.mobs.effectClouds = this.clouds;
   }
   applyAreaEffect(cloud, state) {
+    if (!cloud.effect) return;
     if (near(cloud, state.player, cloud.radius)) this.events.push({ type: 'effect', effect: cloud.effect, duration: 15 });
     for (const mob of [...state.mobs.mobs]) if (near(cloud, mob, cloud.radius)) {
       if (cloud.effect === 'healing') mob.health = Math.min(MOBS[mob.type].health, mob.health + 4);
@@ -294,11 +310,11 @@ export class WorldSystems {
     this.clock = Number.isFinite(saved.clock) ? clamp(saved.clock, 0, 1e9) : 0; this.serial = Number.isSafeInteger(saved.serial) ? saved.serial : 0;
     for (const pair of (Array.isArray(saved.machines) ? saved.machines : []).slice(0, 8192)) {
       if (!Array.isArray(pair)) continue;
-      const [index, data] = pair; if (!Number.isInteger(index) || !data || index < SIZE * SIZE || index >= this.world.blocks.length || data.block !== this.world.blocks[index]) continue;
+      const [index, data] = pair; if (!(Number.isInteger(index) && index >= SIZE * SIZE && index < this.world.blocks.length || validFarKey(index)) || !data || data.block !== this.world.blockAt(index)) continue;
       const m = this.machine(index); if (!m) continue;
       m.slots = safeSlots(data.slots, m.slots.length); m.progress = clamp(Number(data.progress) || 0, 0, 30); m.fuel = clamp(Number(data.fuel) || 0, 0, 480); m.output = safeSlots([data.output], 1)[0];
     }
-    const positioned = value => value && ['x', 'y', 'z'].every(key => Number.isFinite(value[key])) && value.x >= 0 && value.x < SIZE && value.z >= 0 && value.z < SIZE && value.y > 0 && value.y < HEIGHT + 20;
+    const positioned = value => value && ['x', 'y', 'z'].every(key => Number.isFinite(value[key])) && this.world.inside(value.x, 1, value.z) && value.y > 0 && value.y < HEIGHT + 20;
     this.vehicles = (Array.isArray(saved.vehicles) ? saved.vehicles : []).filter(v => positioned(v) && ITEMS[v.item]?.vehicle).slice(0, 32).map(v => ({ ...v, storage: safeSlots(v.storage, 27) }));
     this.decorations = (Array.isArray(saved.decorations) ? saved.decorations : []).filter(positioned).slice(0, 128);
   }
