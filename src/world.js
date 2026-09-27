@@ -204,6 +204,9 @@ export class World {
     const homely = (x, z, tier) => tier === 0
       ? /plains|meadow|flower_forest/.test(terrainColumn(this, x, z).biome)
       : /birch|forest|taiga|jungle/.test(terrainColumn(this, x, z).biome);
+    // The Nether and the End arrive on the platform the generator carves at the
+    // middle of the map, not somewhere out in the rock.
+    if (this.dimension !== 'overworld' && Number.isFinite(this.platformY)) { this.spawn = { x: 48.5, y: this.platformY, z: 48.5 }; this.spawnYaw = -.245; return; }
     const spot = scan((x, z) => homely(x, z, 0)) || scan((x, z) => homely(x, z, 1)) || scan(() => true) || (() => { const c = terrainColumn(this, 48, 48); return { x: 48, z: 48, h: Math.max(c.h, sea + 1), top: B.GRASS }; })();
     this.spawn = { x: spot.x + .5, y: spot.h + 1, z: spot.z + .5 };
     this.spawnYaw = -.245;
@@ -213,36 +216,47 @@ export class World {
       this.set(x, spot.h, z, B.GRASS);
       for (let y = spot.h - 1, filled = 0; y > 0 && filled < 4 && this.get(x, y, z) === B.AIR; y--, filled++) this.set(x, y, z, B.DIRT);
     }
-    // A starter grove: every world hands you wood within a few steps of spawn.
-    const biome = terrainColumn(this, spot.x, spot.z).biome;
-    const species = /snow|frozen|taiga/.test(biome) ? ['SPRUCE_LOG', 'SPRUCE_LEAVES'] : /desert|badlands|savanna/.test(biome) ? ['ACACIA_LOG', 'ACACIA_LEAVES']
-      : /jungle/.test(biome) ? ['JUNGLE_LOG', 'JUNGLE_LEAVES'] : /birch/.test(biome) ? ['BIRCH_LOG', 'BIRCH_LEAVES']
-        : /cherry/.test(biome) ? ['CHERRY_LOG', 'CHERRY_LEAVES'] : /dark|pale/.test(biome) ? ['DARK_OAK_LOG', 'DARK_OAK_LEAVES'] : ['LOG', 'LEAVES'];
-    const [logId, leafId] = species.map(name => B[name] || (name.endsWith('LOG') ? B.LOG : B.LEAVES));
-    const plant = (x, z, base = terrainColumn(this, x, z).h, trunk = 5) => {
-      if (!Number.isInteger(base) || !this.inside(x, base, z) || Math.abs(base - spot.h) > 4) return false;
-      for (let y = base + 1; y <= base + trunk + 1; y++) if (![B.AIR, B.LOG, B.LEAVES].includes(this.get(x, y, z))) return false;
-      for (let y = 1; y <= trunk; y++) this.set(x, base + y, z, logId);
-      for (let dy = -2; dy <= 1; dy++) for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
-        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
-        if (Math.abs(dx) + Math.abs(dz) + Math.abs(dy) > 4) continue;
-        const y = base + trunk + dy;
-        if (this.get(x + dx, y, z + dz) === B.AIR) this.set(x + dx, y, z + dz, leafId);
+    // A starter grove: a biome-appropriate pocket of wood in sight of spawn, with
+    // the opening view kept clear so the landscape still reads on the first frame.
+    if (this.dimension === 'overworld') {
+      const biome = terrainColumn(this, spot.x, spot.z).biome;
+      const species = /snow|frozen|taiga/.test(biome) ? ['SPRUCE_LOG', 'SPRUCE_LEAVES'] : /desert|badlands|savanna/.test(biome) ? ['ACACIA_LOG', 'ACACIA_LEAVES']
+        : /jungle/.test(biome) ? ['JUNGLE_LOG', 'JUNGLE_LEAVES'] : /birch/.test(biome) ? ['BIRCH_LOG', 'BIRCH_LEAVES']
+          : /cherry/.test(biome) ? ['CHERRY_LOG', 'CHERRY_LEAVES'] : /dark|pale/.test(biome) ? ['DARK_OAK_LOG', 'DARK_OAK_LEAVES'] : ['LOG', 'LEAVES'];
+      const [logId, leafId] = species.map(name => B[name] || (name.endsWith('LOG') ? B.LOG : B.LEAVES));
+      const plant = (x, z, base = terrainColumn(this, x, z).h, trunk = 6) => {
+        if (!Number.isInteger(base) || !this.inside(x, base, z) || Math.abs(base - spot.h) > 4) return false;
+        for (let y = base + 1; y <= base + trunk + 1; y++) if (![B.AIR, B.LOG, B.LEAVES].includes(this.get(x, y, z))) return false;
+        for (let y = 1; y <= trunk; y++) this.set(x, base + y, z, logId);
+        // The canopy sits at the top of the trunk so the view under it stays open.
+        for (let dy = -1; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+          if (Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
+          if (Math.abs(dx) + Math.abs(dz) + Math.abs(dy) > 4) continue;
+          const y = base + trunk + dy;
+          if (this.get(x + dx, y, z + dz) === B.AIR) this.set(x + dx, y, z + dz, leafId);
+        }
+        return true;
+      };
+      const level = (x, z) => {
+        if (!this.inside(x, spot.h, z)) return;
+        for (let y = spot.h + 1; y <= spot.h + 8; y++) this.set(x, y, z, B.AIR);
+        this.set(x, spot.h, z, B.GRASS);
+        for (let y = spot.h - 1, filled = 0; y > 0 && filled < 4 && this.get(x, y, z) === B.AIR; y--, filled++) this.set(x, y, z, B.DIRT);
+      };
+      // Level a short corridor ahead so the opening view lands on the starter tree.
+      const fx = -Math.sin(this.spawnYaw), fz = -Math.cos(this.spawnYaw);
+      for (let r = 2; r <= 9; r++) for (const lateral of [-1, 0, 1]) level(Math.round(spot.x + fx * r + fz * lateral), Math.round(spot.z + fz * r - fx * lateral));
+      plant(Math.round(spot.x + fx * 7), Math.round(spot.z + fz * 7), spot.h);
+      for (const [ox, oz] of [[15, 9], [-13, 14], [17, -11], [-16, -8]]) plant(spot.x + ox, spot.z + oz);
+      // Clear anything the world already grew in front of spawn, so the first
+      // frame shows terrain rather than the inside of a canopy.
+      const side = { x: fz, z: -fx }, felled = new Set([B.LOG, B.LEAVES, B.SPRUCE_LOG, B.SPRUCE_LEAVES, B.BIRCH_LOG, B.BIRCH_LEAVES, B.JUNGLE_LOG, B.JUNGLE_LEAVES, B.ACACIA_LOG, B.ACACIA_LEAVES, B.DARK_OAK_LOG, B.DARK_OAK_LEAVES, B.CHERRY_LOG, B.CHERRY_LEAVES]);
+      for (let depth = 2; depth <= 20; depth++) for (let lateral = -8; lateral <= 8; lateral++) {
+        const x = Math.round(spot.x + fx * depth + side.x * lateral), z = Math.round(spot.z + fz * depth + side.z * lateral);
+        if (!this.inside(x, spot.h, z) || Math.hypot(x - spot.x, z - spot.z) < 4) continue;
+        for (let y = spot.h + 1; y < spot.h + 24; y++) if (felled.has(this.get(x, y, z))) this.set(x, y, z, B.AIR);
       }
-      return true;
-    };
-    const level = (x, z) => {
-      if (!this.inside(x, spot.h, z)) return;
-      for (let y = spot.h + 1; y <= spot.h + 7; y++) this.set(x, y, z, B.AIR);
-      this.set(x, spot.h, z, B.GRASS);
-      for (let y = spot.h - 1, filled = 0; y > 0 && filled < 4 && this.get(x, y, z) === B.AIR; y--, filled++) this.set(x, y, z, B.DIRT);
-    };
-    // Level a short corridor ahead so the opening view lands on the starter tree.
-    const fx = -Math.sin(this.spawnYaw), fz = -Math.cos(this.spawnYaw);
-    for (let r = 2; r <= 7; r++) for (const lateral of [-1, 0, 1]) level(Math.round(spot.x + fx * r + fz * lateral), Math.round(spot.z + fz * r - fx * lateral));
-    plant(Math.round(spot.x + fx * 5), Math.round(spot.z + fz * 5), spot.h);
-    // A handful more in the ring: enough wood for a shelter without a hike.
-    for (const [ox, oz] of [[7, 4], [-6, 6], [9, -5], [-9, -3], [4, 9], [-5, -10], [11, 3], [-12, 2]]) plant(spot.x + ox, spot.z + oz);
+    }
   }
   generate() {
     if (this.version >= 4) {

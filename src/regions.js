@@ -51,12 +51,10 @@ export function enrichOverworld(world) {
     for (let y = 1; y < HEIGHT - 1; y++) {
       const id = world.get(x, y, z), r = hash(x, y, z, world.number + 713);
       if (id === B.STONE) {
+        // Ore comes from the vein generator only, so it stays buried and banded;
+        // this pass adds the rock variants that give caves their texture.
         const rock = y < 6 ? B.DEEPSLATE : r < .025 ? B.GRANITE : r < .05 ? B.DIORITE : r < .075 ? B.ANDESITE : r < .08 ? B.CALCITE : r < .09 ? B.TUFF : null;
-        const ore = r < .008 && y < 12 ? B.EMERALD_ORE : r < .022 && y < 12 ? B.REDSTONE_ORE : r < .03 ? B.LAPIS_ORE : r < .047 ? B.COPPER_ORE : r < .055 ? B.AMETHYST : null;
-        if (ore || rock) set(world, x, y, z, ore || rock);
-      }
-      if (y < 7 && [B.COAL, B.IRON, B.COPPER_ORE, B.GOLD, B.REDSTONE_ORE, B.LAPIS_ORE, B.DIAMOND, B.EMERALD_ORE].includes(id)) {
-        const ref = BLOCKS[id].reference; set(world, x, y, z, B[`DEEPSLATE_${ref?.toUpperCase()}`] || id);
+        if (rock) set(world, x, y, z, rock);
       }
       if (safe) continue;
       if ([B.LOG, B.LEAVES].includes(id)) set(world, x, y, z, /desert|badlands/.test(biome) ? B.AIR : trees[id === B.LOG ? 0 : 1]);
