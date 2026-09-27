@@ -42,9 +42,9 @@ export class MobSystem {
   }
   emit(type, detail = {}) { this.events.push({ ...detail, type }); }
   roll(salt = 0) { return hash(++this.serial, salt, Math.floor(this.clock * 10), this.world.number); }
-  fits(type, x, y, z) {
+  fits(type, x, y, z, radius = null) {
     const d = MOBS[type];
-    return !collides(this.world, { x, y, z }, d.height, Math.min(.85, d.width / 2));
+    return !collides(this.world, { x, y, z }, d.height, radius ?? Math.min(.85, d.width / 2));
   }
   swims(type, x, y, z) {
     return this.world.inWater({ x, y: y + .1, z }) && this.world.inWater({ x, y: y + MOBS[type].height - .05, z }) && this.fits(type, x, y, z);
@@ -57,11 +57,16 @@ export class MobSystem {
       (d.habitat === habitat || d.id === 'frog' && biome.includes('swamp') || dim === 'overworld' && night && d.habitat === 'night' && !['water', 'cave', 'sulfur_caves'].includes(habitat)) &&
       (night || ['volcanic', 'cave', 'end', 'sulfur_caves'].includes(habitat) || d.temperament !== 'hostile'));
   }
-  floor(x, z, y, type) {
+  floor(x, z, y, type, radius = null) {
+    const d = MOBS[type], r = radius ?? Math.min(.85, d.width / 2);
+    // Support counts anywhere under the body, so a mob straddling a ledge edge
+    // still has ground beneath it exactly like a player.
+    const cells = [];
+    for (let dx = Math.floor(x - r); dx <= Math.floor(x + r); dx++) for (let dz = Math.floor(z - r); dz <= Math.floor(z + r); dz++) cells.push([dx, dz]);
     for (let dy = 1; dy >= -4; dy--) {
       const ny = Math.floor(y) + dy;
-      const support = this.world.get(Math.floor(x), ny - 1, Math.floor(z));
-      if ((isSolid(support) || type === 'strider' && support === B.LAVA) && this.fits(type, x, ny, z)) return ny;
+      const supported = cells.some(([dx, dz]) => { const block = this.world.get(dx, ny - 1, dz); return isSolid(block) || type === 'strider' && block === B.LAVA; });
+      if (supported && this.fits(type, x, ny, z, radius)) return ny;
     }
     return null;
   }
@@ -153,7 +158,12 @@ export class MobSystem {
     if (m.rolled) amount *= .2;
     if (m.petArmor) amount *= .5;
     m.health -= amount; m.hurt = .25;
-    if (!['sun', 'water', 'lava', 'dry', 'poison'].includes(source)) { m.angry = 15; m.flee = d.temperament === 'passive' ? 4 : 0; }
+    if (!['sun', 'water', 'lava', 'dry', 'poison'].includes(source)) {
+      // Cows, pigs and the rest never fight: they run. Only mobs whose species is
+      // neutral or hostile turn on whoever hit them.
+      if (d.temperament === 'passive' && !d.defender) { m.flee = 5; m.angry = 0; }
+      else { m.angry = 15; m.flee = 0; }
+    }
     if (d.groupAnger) for (const ally of this.mobs) if (ally.type === m.type && distance(ally, m) < 12) ally.angry = 20;
     if (source === 'player') for (const pet of this.mobs) if (pet.tamed && MOBS[pet.type].defender) pet.enemy = m.uid;
     if (d.teleport && m.health > 0) this.teleport(m);
@@ -248,15 +258,32 @@ export class MobSystem {
   }
   moveGround(m, dx, dz) {
     const d = MOBS[m.type];
+    const radius = Math.min(.85, d.width / 2) * (m.scale || 1), height = d.height * (m.scale || 1);
+    const airborne = (m.vy || 0) > .01;
     for (const [ax, delta] of [['x', dx], ['z', dz]]) {
       if (!delta) continue;
-      const p = { ...m, [ax]: m[ax] + delta };
-      const floor = this.floor(p.x, p.z, m.y, m.type);
-      if (floor === null || floor < m.y - 1.2 || floor > m.y + 1.05 || !d.amphibious && waterAt(this.world, { ...p, y: floor })) continue;
-      const radius = Math.min(.85, d.width / 2) * (m.scale || 1), height = d.height * (m.scale || 1);
-      if (floor > m.y + .12) {
-        if (this.fits(m.type, m.x, floor, m.z) && this.fits(m.type, p.x, floor, p.z)) { m.y = floor; m[ax] = p[ax]; m.vy = 0; }
-      } else moveBody(this.world, m, ax, delta, height, radius);
+      // In the air a mob simply travels; on the ground it must have somewhere to
+      // land, which also keeps it from walking off cliffs it cannot reach.
+      if (!airborne) {
+        const p = { ...m, [ax]: m[ax] + delta };
+        // Ground is probed under the mob's centre: a body brushing a ledge it is
+        // already standing beside must not freeze it in place.
+        const floor = this.floor(p.x, p.z, m.y, m.type, .05);
+        if (floor === null || floor < m.y - 1.2 || floor > m.y + 1.05 || !d.amphibious && waterAt(this.world, { ...p, y: floor })) continue;
+        if (floor > m.y + .12) continue;                   // a ledge: hop over it below
+      }
+      moveBody(this.world, m, ax, delta, height, radius);
+    }
+    // Auto-jump. When the next step is a one-block ledge, mobs hop like a player
+    // instead of sliding up it, so they climb hills and fences without teleporting.
+    if ((m.vy || 0) > .01 || !dx && !dz) return;
+    const len = Math.hypot(dx, dz), sx = dx / len, sz = dz / len;
+    for (const reach of [radius + .3, radius + .75]) {
+      const px = m.x + sx * reach, pz = m.z + sz * reach;
+      const ledge = this.floor(px, pz, m.y, m.type);
+      if (ledge === null || ledge <= m.y + .12 || ledge > m.y + 1.05) continue;
+      if (!this.fits(m.type, px, ledge, pz)) continue;
+      m.vy = 7.6; m.jumping = .35; return;
     }
   }
   path(m, goal) {
@@ -295,7 +322,9 @@ export class MobSystem {
       m.enemy = enemy.uid || null; m.goal = enemy; m.activity = 'chase';
       const reach = distance(m, enemy);
       const range = d.ranged ? 15 : d.width + .9;
-      if (reach < range && visible && m.cooldown <= 0) {
+      const bite = Number.isFinite(d.damage) ? d.damage : 0;
+      const mayStrike = d.temperament !== 'passive' || d.defender;
+      if (reach < range && visible && m.cooldown <= 0 && (bite > 0 || d.ranged || d.fuse) && mayStrike) {
         m.cooldown = d.ranged ? d.boss ? 1.1 : 2.2 : 1.2; m.attack = .45;
         if (d.ranged) {
           const from = { x: m.x, y: m.y + d.height * .65, z: m.z }, to = { x: enemy.x, y: enemy.y + (enemy.uid ? MOBS[enemy.type].height * .5 : 1), z: enemy.z };
@@ -303,7 +332,7 @@ export class MobSystem {
           if (d.summon && this.mobs.filter(other => other.type === d.summon).length < 4) this.spawn(d.summon, m, { angry: 10 });
         } else if (!d.fuse) {
           if (enemy.uid) { this.hurt(enemy, d.eatsSlime ? 12 : d.damage, m.tamed ? 'pet' : m.uid); if (d.eatsSlime && enemy.health <= 0 && enemy.type === 'magma_cube') this.addDrop('sea_lantern', 1, m); }
-          else this.emit('damage', { amount: d.damage, effect: d.poison ? 'poison' : d.wither ? 'wither' : d.hunger ? 'hunger' : null });
+          else if (bite > 0) this.emit('damage', { amount: bite, effect: d.poison ? 'poison' : d.wither ? 'wither' : d.hunger ? 'hunger' : null });
         }
       }
       if (d.ranged && reach < 8 && !d.swoop) m.goal = { x: m.x - (enemy.x - m.x) * .35, y: m.y, z: m.z - (enemy.z - m.z) * .35 };
@@ -442,6 +471,7 @@ export class MobSystem {
           }
         }
       }
+      if (m.jumping > 0) m.jumping = Math.max(0, m.jumping - dt);
       const support = this.world.get(Math.floor(m.x), Math.floor(m.y - .02), Math.floor(m.z));
       if (d.movement === 'ground' && !(m.type === 'strider' && support === B.LAVA)) {
         m.vy = m.status?.type === 'levitation' ? 2 : Math.max(-20, (m.vy || 0) - dt * 23);

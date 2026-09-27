@@ -11,6 +11,7 @@ import { transferSlot, craftGrid } from '../src/crafting.js';
 import { encodeSave, decodeSave } from '../src/save.js';
 import { MobSystem } from '../src/mobs.js';
 import { MOBS } from '../src/mob-catalog.js';
+import { regionBiome } from '../src/regions.js';
 import { blockBoxes } from '../src/block-shapes.js';
 import { placeBlock } from '../src/rules.js';
 import { bubbleColumn } from '../src/fluids.js';
@@ -227,4 +228,132 @@ test('wandering traders, horse crosses, and hoglins in the overworld follow thei
   const hoglin = mobs.spawn('hoglin', { x: Math.floor(w.spawn.x) + 4.5, y: gy, z: Math.floor(w.spawn.z) + 4.5 }, { health: 40 }).mob;
   for (let i = 0; i < 400; i++) mobs.tick(.05, state);
   assert.equal(hoglin.type, 'zoglin');
+});
+
+test('ores are vein-shaped, buried, and banded by depth and biome', () => {
+  const world = new World('ore-rules', 5, 'overworld', { streaming: true }).generate();
+  const tally = new Map(), depths = new Map();
+  let exposedRare = 0, rareTotal = 0, emeraldOutsideMountains = 0;
+  for (let x = 0; x < 96; x++) for (let z = 0; z < 96; z++) for (let y = 1; y < 110; y++) {
+    const ref = BLOCKS[world.get(x, y, z)]?.reference;
+    if (!ref?.endsWith('_ore')) continue;
+    tally.set(ref, (tally.get(ref) || 0) + 1);
+    const band = depths.get(ref) || [999, 0];
+    depths.set(ref, [Math.min(band[0], y), Math.max(band[1], y)]);
+    const rare = /diamond|emerald|gold|redstone|lapis/.test(ref);
+    if (rare) {
+      rareTotal++;
+      const open = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+        .filter(([dx, dy, dz]) => [B.AIR, B.WATER].includes(world.get(x + dx, y + dy, z + dz))).length;
+      // Terrain keeps veins buried; only a structure carving past one may reveal a
+      // face, which is exactly how Minecraft's mineshaft walls look.
+      if (open > 1) exposedRare++;
+    }
+    if (ref === 'emerald_ore' && !/peaks|mountain|meadow|snowy_taiga|cherry/.test(regionBiome(world, x, z, y))) emeraldOutsideMountains++;
+  }
+  const sum = pattern => [...tally.entries()].filter(([k]) => k.includes(pattern)).reduce((n, [, v]) => n + v, 0);
+  assert.ok(sum('diamond') > 0, 'the rare ores exist at all');
+  // Emerald is a mountain-only ore, so look for a world that has mountains.
+  const mountainWorld = new World('mountains', 5, 'overworld', { streaming: true }).generate();
+  let emerald = 0;
+  for (let x = 0; x < 96; x++) for (let z = 0; z < 96; z++) for (let y = 1; y < 110; y++) if (BLOCKS[mountainWorld.get(x, y, z)]?.reference === 'emerald_ore') emerald++;
+  assert.ok(emerald > 0, 'emerald ore exists in mountain worlds');
+  assert.ok(sum('coal') > sum('iron') && sum('iron') > sum('diamond'), 'ores get rarer as they get better');
+  assert.ok(exposedRare <= rareTotal * .05, `${exposedRare}/${rareTotal} rare ore blocks sat open to the air`);
+  const diamondDepths = [...depths.entries()].filter(([k]) => k.includes('diamond')).map(([, band]) => band);
+  assert.ok(diamondDepths.length && Math.max(...diamondDepths.map(b => b[1])) <= 16, 'diamond stays in the deepslate band');
+  assert.ok(emeraldOutsideMountains <= sum('emerald') * .05, 'emerald is a mountain ore');
+  // veins, not speckles: each 4-block cell holds a cluster
+  const cells = new Set();
+  for (let x = 0; x < 96; x++) for (let z = 0; z < 96; z++) for (let y = 1; y < 30; y++) if (BLOCKS[world.get(x, y, z)]?.reference === 'diamond_ore') cells.add(`${x >> 2},${y >> 2},${z >> 2}`);
+  const diamond = sum('diamond');
+  assert.ok(diamond / Math.max(1, cells.size) >= 2.5, 'diamond arrives in clusters of a few blocks');
+});
+
+test('the Nether is a 3D cavern with lava, biomes, and a safe arrival platform', () => {
+  const world = new World('nether-cavern', 5, 'nether', { streaming: true }).generate();
+  const p = world.spawn;
+  assert.equal(BLOCKS[world.get(Math.floor(p.x), Math.floor(p.y) - 1, Math.floor(p.z))].name, 'Obsidian');
+  assert.equal(BLOCKS[world.get(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z))].name, 'Air');
+  assert.equal(collides(world, p, 1.8, .3), false, 'the arrival spot is clear');
+  let lava = 0, open = 0, standable = 0, columns = 0;
+  for (const seed of ['nether-cavern', '999', 'alpha']) {
+    const world = new World(seed, 5, 'nether', { streaming: true }).generate();
+    for (let x = 1; x < 95; x++) for (let z = 1; z < 95; z++) {
+      columns++;
+      let floor = false;
+      for (let y = 1; y < 127; y++) {
+        const id = world.get(x, y, z);
+        if (id === B.LAVA) lava++;
+        else if (id === B.AIR) {
+          open++;
+          const below = world.get(x, y - 1, z);
+          if (below !== B.AIR && below !== B.LAVA) floor = true;
+        }
+      }
+      if (floor) standable++;
+    }
+  }
+  assert.ok(lava > columns * .3, 'a lava sea fills the low ground');
+  assert.ok(open / columns > 8, `open cavern space per column (${(open / columns).toFixed(1)})`);
+  assert.ok(standable / columns > .25, `most columns have somewhere to stand (${(standable / columns * 100).toFixed(0)}%)`);
+  // the cavern is bounded like Minecraft's: bedrock floor and ceiling
+  assert.equal(world.get(40, 0, 40), B.BEDROCK);
+  assert.equal(world.get(40, world.height - 1, 40), B.BEDROCK);
+  const biome = terrainColumn(world, 48, 48).biome;
+  assert.ok(['nether_wastes', 'soul_sand_valley', 'crimson_forest', 'warped_forest', 'basalt_deltas'].includes(biome));
+});
+
+test('mobs jump one-block ledges and passive animals never hurt the player', () => {
+  const w = new World('mob-climb', 1);
+  for (let x = 30; x <= 60; x++) for (let z = 30; z <= 60; z++) { w.raw(x, 0, z, B.BEDROCK); w.raw(x, 1, z, B.STONE); for (let y = 2; y < 8; y++) w.raw(x, y, z, B.AIR); }
+  for (let x = 45; x <= 46; x++) for (let z = 30; z <= 60; z++) w.raw(x, 2, z, B.STONE);
+  const state = stateFor(w), mobs = state.mobs;
+  state.player = { x: 58, y: 2, z: 45, yaw: 0, pitch: 0 };
+  for (const type of ['zombie', 'cow', 'pig']) {
+    mobs.mobs.length = 0;
+    const mob = mobs.spawn(type, { x: 32.5, y: 2, z: 45.5 }, { natural: true }).mob;
+    let jumped = false, peak = mob.y;
+    for (let i = 0; i < 1500; i++) {
+      mob.brain = 999; mob.goal = { x: 55.5, y: 2, z: 45.5 }; mob.path = [{ x: 55.5, z: 45.5 }];
+      mobs.tick(.05, state);
+      if (mob.jumping > 0) jumped = true;
+      peak = Math.max(peak, mob.y);
+    }
+    assert.ok(jumped, `${type} jumped the ledge`);
+    assert.ok(peak >= 2.9, `${type} reached the top of the ledge (peak y=${peak.toFixed(2)})`);
+  }
+  // passive species deal no damage even when provoked
+  mobs.mobs.length = 0;
+  const events = [];
+  mobs.emit = (type, detail) => { if (type === 'damage') events.push(detail); };
+  for (const type of ['cow', 'pig', 'sheep', 'chicken', 'villager', 'horse', 'rabbit', 'cat']) {
+    mobs.mobs.length = 0;
+    const mob = mobs.spawn(type, { x: 34.5, y: 2, z: 45.5 }, { natural: true }).mob;
+    mobs.hurt(mob, 1, 'player');
+    const before = events.length;
+    let fled = false;
+    for (let i = 0; i < 200; i++) { mob.brain = 999; mobs.tick(.05, state); if (mob.flee > 0) fled = true; }
+    assert.equal(events.length, before, `${type} never damaged the player`);
+    assert.ok(fled || !mobs.mobs.includes(mob), `${type} ran away instead of fighting`);
+  }
+});
+
+test('caverns are 3D: players dig into caves instead of walking over a hollow shell', () => {
+  const world = new World('cave-shape', 5, 'overworld', { streaming: true }).generate();
+  let columns = 0, withCave = 0, deepOpen = 0, deepTotal = 0, surfaceOpen = 0;
+  for (let x = 2; x < 94; x++) for (let z = 2; z < 94; z++) {
+    const h = terrainColumn(world, x, z).h;
+    if (h < 30) continue;
+    columns++;
+    let found = false;
+    for (let y = 5; y < 48; y++) {
+      deepTotal++;
+      if (world.get(x, y, z) === B.AIR) { deepOpen++; if (!found) { withCave++; found = true; } }
+      if (y > h - 4 && world.get(x, y, z) === B.AIR) surfaceOpen++;
+    }
+  }
+  assert.ok(withCave / columns > .45, `only ${(withCave / columns * 100).toFixed(0)}% of columns meet a cave`);
+  assert.ok(deepOpen / deepTotal > .08, `the deep rock is ${(deepOpen / deepTotal * 100).toFixed(1)}% open`);
+  assert.ok(surfaceOpen / columns < .6, 'the surface is not riddled with holes');
 });
