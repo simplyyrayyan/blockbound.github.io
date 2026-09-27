@@ -31,25 +31,29 @@ export function advancedColumn(world, x, z) {
     result = { h, biome, fluid: B.LAVA, level: 32, top: biome === 'soul_sand_valley' ? B.SOUL_SAND : biome === 'crimson_forest' ? B.CRIMSON_NYLIUM : biome === 'warped_forest' ? B.WARPED_NYLIUM : biome === 'basalt_deltas' ? B.BLACKSTONE : B.NETHERRACK };
   } else if (world.dimension === 'end') {
     const center = 1 - (distance / 82) ** 2;
-    const islands = distance < 96 ? center : distance < 180 ? -1 : fractal(x / 75, z / 75, seed + 31, 3) * 2 - .98;
+    const islands = distance < 96 ? center : distance < 112 ? -1 : fractal(x / 75, z / 75, seed + 31, 3) * 2 - .98;
     const h = islands > .08 ? Math.floor(50 + islands * 13 + noise(x / 23, z / 23, seed) * 5) : -1;
-    result = { h, depth: islands > .08 ? 5 + Math.floor(islands * 19) : 0, biome: distance < 180 ? 'the_end' : islands > .4 ? 'end_highlands' : islands > .2 ? 'end_midlands' : islands > .08 ? 'end_barrens' : 'small_end_islands', top: B.END_STONE, level: -1 };
+    result = { h, depth: islands > .08 ? 5 + Math.floor(islands * 19) : 0, biome: distance < 112 ? 'the_end' : islands > .4 ? 'end_highlands' : islands > .2 ? 'end_midlands' : islands > .08 ? 'end_barrens' : 'small_end_islands', top: B.END_STONE, level: -1 };
   } else {
-    const wx = x + (noise(x / 320, z / 320, seed + 197) - .5) * 95;
-    const wz = z + (noise(x / 320, z / 320, seed + 239) - .5) * 95;
-    const continent = fractal(wx / 380, wz / 380, seed + 5, 3);
-    const erosion = fractal(wx / 115, wz / 115, seed + 107, 3);
-    const peaks = 1 - Math.abs(fractal(wx / 145, wz / 145, seed + 761, 3) * 2 - 1);
-    const temperature = clamp((fractal(wx / 240, wz / 240, seed + 17, 3) - .5) * 1.8 + .5, 0, 1);
-    const moisture = clamp((fractal(wx / 190, wz / 190, seed + 83, 3) - .5) * 1.8 + .5, 0, 1);
-    const riverDistance = Math.abs(noise(wx / 140, wz / 140, seed + 301) - .5);
+    // The world is only 96 blocks across, so landforms and climates are scaled
+    // to fit inside it: a seed now spans several continents, rivers and biomes
+    // instead of a single uniform sheet of terrain.
+    const wx = x + (noise(x / 320, z / 320, seed + 197) - .5) * 48;
+    const wz = z + (noise(x / 320, z / 320, seed + 239) - .5) * 48;
+    const continent = fractal(wx / 150, wz / 150, seed + 5, 3);
+    const erosion = fractal(wx / 76, wz / 76, seed + 107, 3);
+    const peaks = 1 - Math.abs(fractal(wx / 88, wz / 88, seed + 761, 3) * 2 - 1);
+    const temperature = clamp((fractal(wx / 118, wz / 118, seed + 17, 3) - .5) * 1.9 + .5, 0, 1);
+    const moisture = clamp((fractal(wx / 96, wz / 96, seed + 83, 3) - .5) * 1.9 + .5, 0, 1);
+    const riverDistance = Math.abs(noise(wx / 78, wz / 78, seed + 301) - .5);
     let h = sea + (continent - .43) * 100 + (erosion - .5) * 10;
     h += Math.max(0, peaks - .68) ** 2 * 310 * clamp((continent - .47) * 7, 0, 1);
     h += (fractal(x / 32, z / 32, seed, 3) - .5) * 8;
     if (continent < .39) h = lerp(22, sea - 3, clamp(continent / .39, 0, 1));
     if (continent > .38 && riverDistance < .048) h = lerp(sea - 4, h, smooth(clamp((riverDistance - .014) / .034, 0, 1)));
-    const safe = smooth(clamp((distance - 7) / 16, 0, 1));
-    h = Math.floor(lerp(sea + 5, clamp(h, 18, 109), safe));
+    // Only a small pad near spawn is levelled; the rest of the seed shows through.
+    const safe = smooth(clamp((distance - 4) / 7, 0, 1));
+    h = Math.floor(lerp(sea + 3, clamp(h, 18, 109), safe));
     let biome = h < sea - 10 ? 'deep_ocean' : h < sea ? riverDistance < .04 && continent > .38 ? 'river' : 'ocean' : h <= sea + 2 ? 'beach' :
       h > 85 ? temperature < .5 ? 'snowy_taiga' : 'stony_peaks' : temperature < .23 ? moisture > .45 ? 'snowy_taiga' : 'snowy_plains' :
       temperature > .7 ? moisture < .32 ? 'desert' : moisture > .61 ? 'jungle' : 'savanna' :
@@ -59,8 +63,10 @@ export function advancedColumn(world, x, z) {
     if (biome === 'forest' && h > 64 && noise(x / 65, z / 65, seed + 99) > .65) biome = 'cherry_grove';
     else if (biome === 'forest' && noise(x / 80, z / 80, seed + 81) > .73) biome = 'flower_forest';
     if (biome === 'dark_forest' && noise(x / 80, z / 80, seed + 99) > .68) biome = 'pale_garden';
+    // A rare fungal clearing gives mooshrooms somewhere to live.
+    if ((biome === 'forest' || biome === 'dark_forest') && moisture > .66 && noise(x / 42, z / 42, seed + 131) > .72) biome = 'mushroom_fields';
     if (temperature < .2 && biome === 'river') biome = 'frozen_river';
-    if (distance < 22) biome = 'plains';
+    if (distance < 5) biome = 'plains';
     if (biome.includes('swamp')) h = sea;
     const top = /ocean|river|beach|desert/.test(biome) ? B.SAND : biome === 'badlands' ? B.RED_SAND : /snow/.test(biome) ? B.SNOW_BLOCK : biome.includes('swamp') ? B.MUD : /peaks|mountains/.test(biome) ? B.STONE : B.GRASS;
     result = { h, biome, top, fluid: B.WATER, level: sea, temperature, moisture, riverDistance };
@@ -72,34 +78,46 @@ export function advancedColumn(world, x, z) {
 // Placement follows Minecraft's dimension and biome tags. One candidate per
 // region, independent of exploration order, avoids overlapping landmarks.
 export function advancedStructures(world, cx, cz) {
-  const span = 192, result = [], x0 = cx * CHUNK, z0 = cz * CHUNK;
-  for (let rx = Math.floor((x0 - 20) / span); rx <= Math.floor((x0 + CHUNK + 20) / span); rx++) for (let rz = Math.floor((z0 - 20) / span); rz <= Math.floor((z0 + CHUNK + 20) / span); rz++) {
+  const span = 64, result = [], x0 = cx * CHUNK, z0 = cz * CHUNK;
+  for (let rx = Math.floor((x0 - 24) / span); rx <= Math.floor((x0 + CHUNK + 24) / span); rx++) for (let rz = Math.floor((z0 - 24) / span); rz <= Math.floor((z0 + CHUNK + 24) / span); rz++) {
     const key = world.dimension + ':' + rx + ',' + rz;
     if (!world.structureCache.has(key)) {
-      let chosen = null;
-      for (let attempt = 0; attempt < 12 && !chosen; attempt++) {
-        const x = rx * span + 24 + Math.floor(hash(rx, attempt + 711, rz, world.number) * (span - 48));
-        const z = rz * span + 24 + Math.floor(hash(rx, attempt + 891, rz, world.number) * (span - 48));
-        if (Math.hypot(x - 48, z - 48) < 40) continue;
+      // One landmark per region: look for the flattest fitting spot so hills and
+      // noisy biomes still host villages and temples instead of nothing at all.
+      let chosen = null, flattest = null;
+      if (hash(rx, 8, rz, world.number) > .88) { world.structureCache.set(key, null); }
+      else for (let attempt = 0; attempt < 16; attempt++) {
+        const x = rx * span + 10 + Math.floor(hash(rx, attempt + 711, rz, world.number) * (span - 20));
+        const z = rz * span + 10 + Math.floor(hash(rx, attempt + 891, rz, world.number) * (span - 20));
+        const distance = Math.hypot(x - 48, z - 48);
         const col = advancedColumn(world, x, z), cave = caveBiome(world, x, z);
         const eligible = STRUCTURE_TYPES.filter(d => d.dimension === world.dimension && (!STRUCTURE_BIOMES[d.id] || STRUCTURE_BIOMES[d.id].includes(d.underground ? cave : col.biome)));
-        if (!eligible.length || hash(rx, 8, rz, world.number) > .8) continue;
-        const def = eligible[Math.min(eligible.length - 1, Math.floor(hash(rx, attempt + 911, rz, world.number) * eligible.length))];
-        const samples = [[-10, -10], [10, -10], [-10, 10], [10, 10], [0, 0]].map(([dx, dz]) => advancedColumn(world, x + dx, z + dz));
-        const low = Math.min(...samples.map(c => c.h)), high = Math.max(...samples.map(c => c.h));
+        if (!eligible.length || distance < 26) continue;
+        // Prefer a visible landmark over yet another dungeon when the biome allows
+        // one, so villages and temples are not crowded out by caves.
+        const surface = eligible.filter(d => !d.underground);
+        const pool = surface.length && hash(rx, attempt + 977, rz, world.number) > .34 ? surface : eligible;
+        const def = pool[Math.min(pool.length - 1, Math.floor(hash(rx, attempt + 911, rz, world.number) * pool.length))];
+        const samples = [[-7, -7], [7, -7], [-7, 7], [7, 7], [0, 0]].map(([dx, dz]) => advancedColumn(world, x + dx, z + dz));
+        const low = Math.min(...samples.map(c => c.h)), high = Math.max(...samples.map(c => c.h)), relief = high - low;
         const aquatic = /ocean_monument|ocean_ruins|shipwreck/.test(def.id);
-        if (low < 0 || !def.underground && !aquatic && (low < (col.level || 0) || high - low > 6)) continue;
+        if (low < 0) continue;
+        if (!def.underground && !aquatic && low < (col.level || 0)) continue;
         if (def.id === 'ocean_monument' && (high > world.seaLevel - 8 || samples.some(c => !c.biome.includes('ocean')))) continue;
-        if (def.id === 'end_city' && Math.hypot(x - 48, z - 48) < 180) continue;
+        if (def.id === 'end_city' && distance < 116) continue;
         const y = def.underground ? def.id === 'ancient_city' ? 13 : 20 : aquatic ? col.h + 1 : high + 1;
         if (def.underground && low < y + 12 || y + 19 >= world.height) continue;
-        chosen = { ...def, x, z, y, key, biome: def.underground ? cave : col.biome, spawns: [] };
+        const candidate = { ...def, x, z, y, key, biome: def.underground ? cave : col.biome, spawns: [] };
+        if (def.underground || aquatic || relief <= 10) { chosen = candidate; break; }
+        if (!flattest || relief < flattest.relief) flattest = { ...candidate, relief };
       }
+      // Hilly region with an eligible surface landmark: level the ground for it.
+      if (!chosen && flattest) { chosen = { ...flattest }; delete chosen.relief; }
       if (world.structureCache.size > 512) world.structureCache.delete(world.structureCache.keys().next().value);
       world.structureCache.set(key, chosen);
     }
     const s = world.structureCache.get(key);
-    if (s && s.x + 20 >= x0 && s.x - 20 < x0 + CHUNK && s.z + 20 >= z0 && s.z - 20 < z0 + CHUNK) result.push(s);
+    if (s && s.x + 24 >= x0 && s.x - 24 < x0 + CHUNK && s.z + 24 >= z0 && s.z - 24 < z0 + CHUNK) result.push(s);
   }
   return result;
 }

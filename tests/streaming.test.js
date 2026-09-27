@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { World, HEIGHT, collides, validFarKey } from '../src/world.js';
 import { B, BLOCKS, freshItem } from '../src/catalog.js';
 import { terrainColumn, structureCandidates, STRUCTURE_BIOMES } from '../src/terrain.js';
@@ -174,4 +175,56 @@ test('torches have a narrow non-solid shape and can attach to dry floors and wal
   const hit = { x: 10, y: 3, z: 10, id: B.STONE, normal: { x: 1, y: 0, z: 0 }, adjacent: { x: 11, y: 3, z: 10 } };
   assert.ok(placeBlock(w, inv, 0, hit, { x: 3, y: 2, z: 3 }).ok); assert.equal(w.stateAt(11, 3, 10).wall, true);
   assert.equal(collides(w, { x: 11.5, y: 3, z: 10.5 }), false);
+});
+
+test('every species has a spawn path and structure tables only name real mobs', () => {
+  const source = readFileSync(new URL('../src/regions.js', import.meta.url), 'utf8');
+  const named = new Set();
+  for (const call of source.matchAll(/spawns\(([\s\S]*?)\);/g)) for (const quoted of call[1].matchAll(/'([a-z0-9_]+)'/g)) named.add(quoted[1]);
+  const structures = new Set([...source.matchAll(/export const STRUCTURE_TYPES = \[([\s\S]*?)\];/g)].flatMap(m => [...m[1].matchAll(/'([a-z0-9_]+)'/g)].map(x => x[1])));
+  for (const id of named) assert.ok(Object.hasOwn(MOBS, id) || structures.has(id), `${id} is not a species`);
+  const natural = new Set();
+  for (const dimension of ['overworld', 'nether', 'end']) {
+    const world = new World('spawn-paths', 5, dimension, { streaming: true }).generate(), mobs = new MobSystem(world, { mobs: [] });
+    for (let x = 2; x < 96; x += 6) for (let z = 2; z < 96; z += 6) {
+      const h = world.heightAt(x, z);
+      for (const y of [h + 1, h + 3, 6, 12]) for (const night of [false, true]) for (const type of mobs.naturalTypes(x, y, z, night)) natural.add(type.id);
+    }
+  }
+  assert.ok(natural.size >= 45, `only ${natural.size} species spawn naturally`);
+});
+
+test('pumpkins build golems and eggs hatch into their species', () => {
+  const w = flat(), mobs = new MobSystem(w, { mobs: [] });
+  w.set(10, 2, 10, B.SNOW); w.set(10, 1, 10, B.SNOW);
+  assert.equal(mobs.checkBuild(10, 3, 10, B.PUMPKIN, {}), true);
+  assert.equal(mobs.mobs.some(m => m.type === 'snow_golem'), true);
+  for (const [dx, dy, dz] of [[0, -1, 0], [1, -1, 0], [-1, -1, 0], [0, -2, 0]]) w.set(20 + dx, 3 + dy, 20 + dz, B.IRON_BLOCK);
+  w.set(20, 3, 20, B.PUMPKIN);
+  assert.equal(mobs.checkBuild(20, 3, 20, B.PUMPKIN, {}), true);
+  assert.equal(mobs.mobs.some(m => m.type === 'iron_golem'), true);
+  w.set(30, 3, 30, B.SNIFFER_EGG);
+  mobs.checkBuild(30, 3, 30, B.SNIFFER_EGG, {});
+  mobs.tick(13, stateFor(w));
+  assert.equal(mobs.mobs.some(m => m.type === 'sniffer'), true);
+});
+
+test('wandering traders, horse crosses, and hoglins in the overworld follow their rules', () => {
+  const w = new World('mob-rules', 5).generate(), state = stateFor(w), mobs = state.mobs;
+  state.player = { ...w.spawn, yaw: 0, pitch: 0 };
+  mobs.mobs.length = 0; mobs.traderTimer = 300;
+  mobs.tick(1, state);
+  const trader = mobs.mobs.find(m => m.type === 'wandering_trader');
+  assert.ok(trader); assert.equal(mobs.mobs.filter(m => m.type === 'trader_llama').length, 2);
+  mobs.mobs.length = 0;
+  const ground = world => { const x = Math.floor(world.spawn.x), z = Math.floor(world.spawn.z); return world.heightAt(x, z) + 1; };
+  const gy = ground(w);
+  const horse = mobs.spawn('horse', { x: Math.floor(w.spawn.x) + .5, y: gy, z: Math.floor(w.spawn.z) + .5 }, {}).mob, donkey = mobs.spawn('donkey', { x: Math.floor(w.spawn.x) + 2.5, y: gy, z: Math.floor(w.spawn.z) + .5 }, {}).mob;
+  horse.love = 30; donkey.love = 30;
+  for (let i = 0; i < 40; i++) mobs.tick(.05, state);
+  assert.equal(mobs.mobs.some(m => m.type === 'mule'), true);
+  mobs.mobs.length = 0;
+  const hoglin = mobs.spawn('hoglin', { x: Math.floor(w.spawn.x) + 4.5, y: gy, z: Math.floor(w.spawn.z) + 4.5 }, { health: 40 }).mob;
+  for (let i = 0; i < 400; i++) mobs.tick(.05, state);
+  assert.equal(hoglin.type, 'zoglin');
 });

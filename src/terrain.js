@@ -12,7 +12,7 @@ export const STRUCTURE_BIOMES = {
   igloo: ['snowy_plains', 'snowy_taiga'], witch_hut: ['swamp'], trail_ruins: ['taiga', 'snowy_taiga', 'jungle', 'birch_forest'],
   ancient_city: ['deep_dark'],
   bastion_remnant: ['nether_wastes', 'soul_sand_valley', 'crimson_forest', 'warped_forest'],
-  end_city: ['end_highlands', 'end_midlands'],
+  end_city: ['end_highlands', 'end_midlands', 'the_end'],
 };
 const NETHER = ['nether_wastes', 'soul_sand_valley', 'crimson_forest', 'warped_forest', 'basalt_deltas'];
 export function terrainColumn(world, x, z) {

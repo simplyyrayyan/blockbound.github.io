@@ -16,11 +16,11 @@ const friendly = m => m.tamed || MOBS[m.type].temperament === 'guardian';
 const waterAt = (world, p) => world.inWater({ ...p, y: p.y + .2 });
 const projectileColor = { fireball: '#f6ae46', arrow: '#bca382', trident: '#77cecb', poison: '#9bbe69', poison_arrow: '#9bbe69', slow_arrow: '#91c6db', wind: '#c1ece7', beam: '#e8cb91', fangs: '#c9c8b9', dragon_breath: '#c17dd8', wither_skull: '#777b82', shulker_bullet: '#dab8df', sonic: '#6eddd4', spit: '#eae7df', snowball: '#ecf3ef' };
 const railDirections = facing => [{ x: 0, z: -1 }, { x: 1, z: 0 }, { x: 0, z: 1 }, { x: -1, z: 0 }][facing % 4];
-const structureOnly = new Set(['villager', 'wandering_trader', 'trader_llama', 'iron_golem', 'snow_golem', 'allay', 'evoker', 'vindicator', 'vex', 'ravager', 'guardian', 'elder_guardian', 'shulker', 'silverfish', 'breeze', 'happy_ghast', 'zombie_horse', 'skeleton_horse', 'mule', 'endermite', 'blaze', 'wither_skeleton', 'piglin_brute', 'zoglin', 'sniffer', 'tadpole', 'camel', 'cat']);
+const structureOnly = new Set(['villager', 'iron_golem', 'evoker', 'vindicator', 'elder_guardian', 'shulker', 'silverfish', 'breeze', 'blaze', 'wither_skeleton', 'piglin_brute', 'tadpole', 'cat']);
 const spawnBiomes = {
   hoglin: ['crimson_forest'], piglin: ['nether_wastes', 'crimson_forest'], magma_cube: ['nether_wastes', 'basalt_deltas'], ghast: ['nether_wastes', 'soul_sand_valley', 'basalt_deltas'],
   husk: ['desert'], armadillo: ['savanna', 'badlands'], parrot: ['jungle'], panda: ['jungle'], ocelot: ['jungle'], mooshroom: ['mushroom_fields'], frog: ['swamp', 'mangrove_swamp'],
-  fox: ['taiga', 'snowy_taiga'], bogged: ['swamp', 'mangrove_swamp'], axolotl: ['caves'], glow_squid: ['caves'], turtle: ['beach'],
+  fox: ['taiga', 'snowy_taiga'], bogged: ['swamp', 'mangrove_swamp'], axolotl: ['river', 'swamp', 'mangrove_swamp', 'ocean', 'deep_ocean', 'beach'], glow_squid: ['ocean', 'deep_ocean', 'river'], turtle: ['beach'],
 };
 
 function rayBox(origin, dir, min, max) {
@@ -318,19 +318,72 @@ export class MobSystem {
       if (loot) { m.goal = loot; if (distance(m, loot) < 2) { loot.x = p.x; loot.y = p.y; loot.z = p.z; } }
     }
     if (m.love > 0 && m.breedCooldown <= 0) {
-      const mate = this.mobs.find(other => other !== m && other.type === m.type && other.love > 0 && other.breedCooldown <= 0 && distance(m, other) < 5);
+      const crossable = other => other !== m && other.love > 0 && other.breedCooldown <= 0 && distance(m, other) < 5 && (other.type === m.type || ['horse', 'donkey'].includes(m.type) && ['horse', 'donkey'].includes(other.type));
+      const mate = this.mobs.find(crossable);
       if (mate) {
         m.goal = mate;
         if (distance(m, mate) < 2) {
-          const result = this.spawn(m.type === 'frog' ? 'tadpole' : m.type, m, { baby: true, scale: .5, tamed: m.tamed && mate.tamed });
+          const child = m.type === 'frog' ? 'tadpole' : ['horse', 'donkey'].includes(m.type) && ['horse', 'donkey'].includes(mate.type) && m.type !== mate.type ? 'mule' : m.type;
+          const result = this.spawn(child, m, { baby: true, scale: .5, tamed: m.tamed && mate.tamed });
           if (result.ok) { m.love = mate.love = 0; m.breedCooldown = mate.breedCooldown = 90; this.emit('xp', { amount: 5 }); }
         }
       }
     }
     if (m.goal && ['ground', 'stationary'].includes(d.movement) && d.movement !== 'stationary') this.path(m, m.goal);
   }
+  // Wandering traders visit on a timer, llamas in tow, like clockwork.
+  traderVisit(state) {
+    const w = this.world;
+    if (w.dimension !== 'overworld') return;
+    const traders = this.mobs.filter(m => m.type === 'wandering_trader').length;
+    if (traders >= 2) return;
+    const p = state.player, angle = this.roll() * Math.PI * 2, radius = 14 + this.roll() * 6;
+    const x = Math.round(p.x + Math.cos(angle) * radius), z = Math.round(p.z + Math.sin(angle) * radius);
+    if (!w.inside(x, 1, z)) return;
+    const y = w.heightAt(x, z) + 1;
+    if (w.get(x, y - 1, z) === B.WATER || w.get(x, y - 1, z) === B.LAVA) return;
+    const trader = this.spawn('wandering_trader', { x: x + .5, y, z: z + .5 }, { natural: true });
+    if (!trader.ok) return;
+    for (let i = 0; i < 2; i++) {
+      this.spawn('trader_llama', { x: x + .5 + (i ? 1.4 : -1.4), y, z: z + .5 }, { natural: true });
+    }
+    this.emit('message', { message: 'A wandering trader has arrived with llamas' });
+  }
+  // Pumpkins on snow or iron make golems, exactly like the real thing.
+  checkBuild(x, y, z, placedId, state) {
+    const w = this.world, at = (dx, dy, dz) => w.get(x + dx, y + dy, z + dz);
+    if (placedId === B.PUMPKIN) {
+      if (at(0, -1, 0) === B.SNOW && at(0, -2, 0) === B.SNOW) {
+        w.set(x, y, z, B.AIR); w.set(x, y - 1, z, B.AIR); w.set(x, y - 2, z, B.AIR);
+        const result = this.spawn('snow_golem', { x: x + .5, y: y - 2, z: z + .5 }, { natural: true });
+        this.emit('message', { message: result.ok ? 'The snow comes to life' : result.reason });
+        return true;
+      }
+      const t = [[0, -1, 0], [1, -1, 0], [-1, -1, 0], [0, -2, 0]].every(([dx, dy, dz]) => at(dx, dy, dz) === B.IRON_BLOCK);
+      if (t) {
+        for (const [dx, dy, dz] of [[0, 0, 0], [0, -1, 0], [1, -1, 0], [-1, -1, 0], [0, -2, 0]]) w.set(x + dx, y + dy, z + dz, B.AIR);
+        const result = this.spawn('iron_golem', { x: x + .5, y: y - 2, z: z + .5 }, { natural: true });
+        this.emit('message', { message: result.ok ? 'The village guardian awakens' : result.reason });
+        return true;
+      }
+    }
+    if (placedId === B.SNIFFER_EGG || placedId === B.TURTLE_EGG) {
+      const type = placedId === B.SNIFFER_EGG ? 'sniffer' : 'turtle';
+      this.hatchTimer = { x: x + .5, y, z: z + .5, type, at: this.clock + 12 };
+      this.emit('message', { message: `The ${ITEMS[type === 'sniffer' ? 'sniffer_egg' : 'turtle_egg']?.name || 'egg'} is warming up` });
+      return true;
+    }
+    return false;
+  }
   tick(dt, state) {
     this.clock += dt;
+    if (this.hatchTimer && this.clock >= this.hatchTimer.at) {
+      const { x, y, z, type } = this.hatchTimer; this.hatchTimer = null;
+      const result = this.spawn(type, { x, y, z }, { baby: true, scale: .6, natural: true });
+      if (result.ok) this.emit('message', { message: `The egg hatched into a ${MOBS[type].name.toLowerCase()}` });
+    }
+    this.traderTimer = (this.traderTimer || 0) + dt;
+    if (this.traderTimer > 210) { this.traderTimer = 0; this.traderVisit(state); }
     const p = state.player, hour = (8.67 + state.elapsed / 60) % 24, night = hour < 6 || hour > 18;
     for (const m of [...this.mobs]) {
       m.previousX = m.x; m.previousY = m.y; m.previousZ = m.z;
@@ -344,6 +397,7 @@ export class MobSystem {
       if (m.health <= 0) continue;
       if (d.regenerate && m.angry <= 0) m.health = Math.min(d.health, m.health + dt * .6);
       if (d.burns && this.world.dimension === 'overworld' && !night && m.y >= this.world.surface(m.x, m.z) - .1 && !waterAt(this.world, m)) { m.burning = true; this.hurt(m, dt * .8, 'sun'); } else m.burning = false;
+      if (m.type === 'hoglin' && this.world.dimension === 'overworld') { m.overworld = (m.overworld || 0) + dt; if (m.overworld > 15) { m.type = 'zoglin'; m.overworld = 0; m.angry = 30; this.emit('message', { message: 'The hoglin turns into a zoglin' }); } }
       if (!this.mobs.includes(m)) continue;
       if (d.teleport && waterAt(this.world, m)) { this.hurt(m, dt * 3, 'water'); this.teleport(m); }
       if (!d.fireproof && this.world.get(Math.floor(m.x), Math.floor(m.y), Math.floor(m.z)) === B.LAVA) this.hurt(m, dt * 6, 'lava');
@@ -417,7 +471,19 @@ export class MobSystem {
     }
     for (const crop of this.crops) crop.age += dt;
     this.spawnTimer += dt;
-    if (this.spawnTimer > 8) { this.spawnTimer = 0; this.populateStructures(state.player); if (this.mobs.filter(m => m.natural).length < NATURAL_LIMIT) this.naturalSpawn(state, night); }
+    if (this.spawnTimer > 8) {
+      this.spawnTimer = 0; this.populateStructures(state.player);
+      if (this.mobs.filter(m => m.natural).length < NATURAL_LIMIT) this.naturalSpawn(state, night);
+      // Skeleton traps: a rare night-time horse spawn in the open air.
+      if (night && this.world.dimension === 'overworld' && this.mobs.filter(m => m.natural).length < NATURAL_LIMIT && this.roll() < .05) {
+        const p = state.player, angle = this.roll() * Math.PI * 2, radius = 18 + this.roll() * 14;
+        const x = Math.round(p.x + Math.cos(angle) * radius), z = Math.round(p.z + Math.sin(angle) * radius);
+        if (this.world.inside(x, 1, z)) {
+          const y = this.world.heightAt(x, z) + 1;
+          if (this.world.get(x, y - 1, z) !== B.WATER) this.spawn(this.roll() < .5 ? 'skeleton_horse' : 'zombie_horse', { x: x + .5, y, z: z + .5 }, { natural: true });
+        }
+      }
+    }
   }
   updateProjectiles(dt, state) {
     for (const shot of [...this.projectiles]) {

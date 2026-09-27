@@ -409,7 +409,7 @@ async function enterWorld(saved = null) {
     const seed = saved ? rawSeed : /^-?\d+$/.test(rawSeed) ? BigInt(rawSeed).toString() : String(hashString(rawSeed || '0'));
     const world = new World(seed, saved ? saved.worldVersion || 1 : 5, saved?.dimension || 'overworld', { streaming: !saved || (saved.worldVersion || 1) >= 4 }).generate(); if (saved) { world.applyEdits(saved.edits); world.applyStates(saved.blockStates); world.applyFarEdits(saved.farEdits); world.applyFarStates(saved.farBlockStates); }
     const mode = saved?.mode || selectedMode;
-    const player = { ...world.spawn, yaw: -.245, pitch: -.015, vy: 0, grounded: false, flying: false, ...(saved?.player || {}) };
+    const player = { ...world.spawn, yaw: world.spawnYaw ?? -.245, pitch: -.015, vy: 0, grounded: false, flying: false, ...(saved?.player || {}) };
     if (collides(world, player)) Object.assign(player, world.spawn);
     state = { id: saved?.id || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, world, mode, player, inventory: saved ? new Inventory(saved.inventory) : Inventory.starter(mode === 'creative'), selected: saved?.selected || 0, health: saved?.health ?? 20, food: saved?.food ?? 20, xp: saved?.xp || 0, elapsed: saved?.elapsed || 0, progress: saved?.progress || {}, survivalTimer: 0, fluidTimer: 0, oxygen: 12, settings, dimensions: saved?.dimensions || {}, enderStorage: saved?.enderStorage || Array(27).fill(null), craftingSlots: saved?.craftingSlots || Array(4).fill(null), spawnPoint: saved?.spawnPoint || null, deathPoint: saved?.deathPoint || null };
     state.equipment = saved?.equipment || {}; state.effects = saved?.effects || {}; state.attackCooldown = 0; state.riding = null; state.vehicle = null; state.music = null; state.settings = settings;
@@ -428,7 +428,7 @@ async function enterWorld(saved = null) {
 function respawn() {
   state.deathPoint = { x: state.player.x, y: state.player.y, z: state.player.z, dimension: state.world.dimension };
   const spawn = state.spawnPoint?.dimension === state.world.dimension ? state.spawnPoint : state.world.spawn;
-  Object.assign(state.player, spawn, { vy: 0, yaw: -.245, pitch: -.015 });
+  Object.assign(state.player, spawn, { vy: 0, yaw: state.world.spawnYaw ?? -.245, pitch: -.015 });
   // A player may have built over the clearing since their last visit.
   for (let y = spawn.y; y < state.world.height + 2; y++) { state.player.y = y; if (!collides(state.world, state.player)) break; }
   state.health = 20; state.food = Math.max(12, state.food); state.oxygen = 15; state.player.fallDistance = 0; clearInput();
@@ -511,7 +511,7 @@ function interact() {
   const p = state.player;
   direction.set(-Math.sin(p.yaw) * Math.cos(p.pitch), Math.sin(p.pitch), -Math.cos(p.yaw) * Math.cos(p.pitch));
   target = raycast(state.world, { x: p.x, y: p.y + 1.62, z: p.z }, direction, state.mode === 'creative' ? 8 : 6);
-  const entity = state.mobs.raycast({ x: p.x, y: p.y + 1.62, z: p.z }, direction, state.mode === 'creative' ? 8 : 6)?.mob;
+  const entity = state.mobs.raycast({ x: p.x, y: p.y + 1.62, z: p.z }, direction, state.mode === 'creative' ? 5 : 3.8)?.mob;
   const vehicleHit = state.mobs?.vehicleRaycast({ x: p.x, y: p.y + 1.62, z: p.z }, direction, state.mode === 'creative' ? 8 : 6)?.vehicle;
   if (vehicleHit) {
     const held = state.inventory.slots[state.selected], heldDef = ITEMS[held?.id];
@@ -542,6 +542,7 @@ function interact() {
   const result = placeBlock(state.world, state.inventory, state.selected, target, state.player, state.mode === 'creative');
   if (!result.ok) return warn(result.reason);
   if (result.id === B.TABLE) { state.progress.placedTable = true; toast('Your workbench is ready. Right-click it or press E nearby.'); }
+  if ([B.PUMPKIN, B.SNIFFER_EGG, B.TURTLE_EGG].includes(result.id)) state.mobs.checkBuild(result.x, result.y, result.z, result.id, state);
   swing = .35; tone('place'); renderHotbar(); $('#save-status').textContent = 'Unsaved changes';
 }
 
@@ -602,8 +603,11 @@ async function switchDimension(dimension) {
   $('#loading').classList.remove('hidden'); clearInput();
   await new Promise(resolve => requestAnimationFrame(resolve));
   try {
-    const world = new World(state.world.seed, saved ? saved.worldVersion || 3 : 5, dimension, { streaming: true }).generate(); if (saved) { world.applyEdits(saved.edits); world.applyStates(saved.blockStates); world.applyFarEdits(saved.farEdits); world.applyFarStates(saved.farBlockStates); }
-    state.world = world; state.player = { ...(saved?.player || world.spawn), yaw: saved?.player?.yaw ?? -.245, pitch: saved?.player?.pitch ?? -.015, vy: 0, grounded: false, flying: false };
+    // A legacy world keeps its own generation version in every dimension so one
+    // save never mixes terrain heights; brand-new worlds get the current generator.
+    const version = saved ? saved.worldVersion || 3 : state.world.version >= 4 ? state.world.version : 5;
+    const world = new World(state.world.seed, version, dimension, { streaming: true }).generate(); if (saved) { world.applyEdits(saved.edits); world.applyStates(saved.blockStates); world.applyFarEdits(saved.farEdits); world.applyFarStates(saved.farBlockStates); }
+    state.world = world; state.player = { ...(saved?.player || world.spawn), yaw: saved?.player?.yaw ?? world.spawnYaw ?? -.245, pitch: saved?.player?.pitch ?? -.015, vy: 0, grounded: false, flying: false };
     if (collides(world, state.player)) Object.assign(state.player, world.spawn);
     state.systems = new WorldSystems(world, saved?.systems); state.mobs = new MobSystem(world, saved?.entities); state.mobs.systems = state.systems; state.riding = null; state.vehicle = null; state.portalCooldown = 2;
     state.portalExitRequired = true;
@@ -614,7 +618,13 @@ async function switchDimension(dimension) {
 
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(.1, (now - (lastTime || now)) / 1000); lastTime = now;
+  // A single bad frame must never stop the clock, the HUD or the autosave.
+  try { frameStep(now); } catch (error) { console.error('frame error:', error); }
+}
+
+function frameStep(now) {
+  const dt = Math.min(.1, (now - (lastTime || now)) / 1000);
+  lastTime = now;
   if (document.hidden) return;
   if (state && !['play', 'station'].includes(overlay) && overlay !== 'home' && !needsRender) return;
   if ((!state || overlay === 'home') && now - lastMenuFrame < 50) return;
@@ -629,7 +639,7 @@ function frame(now) {
     const mount = state.mobs.mobs.find(m => m.uid === state.riding);
     view.camera.position.set(p.x, p.y + 1.62 + (mount ? MOBS[mount.type].height * .45 : 0), p.z); view.camera.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
     view.camera.getWorldDirection(direction); target = raycast(state.world, view.camera.position, direction, state.mode === 'creative' ? 8 : 6);
-    mobTarget = state.mobs.raycast(view.camera.position, direction, state.mode === 'creative' ? 8 : 6);
+    mobTarget = state.mobs.raycast(view.camera.position, direction, state.mode === 'creative' ? 5 : 3.8);
     if (mobTarget?.mob.uid === state.riding) mobTarget = null;
     if (overlay === 'play') { mineUpdate(dt); updateSpear(state, dt, useHeld); }
     const progress = mining ? clamp(mining.elapsed / mining.total, 0, 1) : 0;
@@ -800,9 +810,22 @@ window.addEventListener('resize', () => { view.resize(); needsRender = true; });
 window.addEventListener('pagehide', () => saveWorld());
 window.addEventListener('beforeunload', () => saveWorld());
 
+// Every visit gets its own backdrop: pick a fresh seed for the menu panorama and
+// pre-fill the seed box with it, so "Create a world" never repeats the last world.
+function randomSeed() {
+  const values = new Uint32Array(2);
+  if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(values);
+  else { values[0] = Math.random() * 0xffffffff; values[1] = Math.random() * 0xffffffff; }
+  return String((BigInt(values[0]) << 32n | BigInt(values[1])) % 1000000000000n);
+}
+const menuSeed = randomSeed();
+$('#seed-input').value = menuSeed;
 const menuCenter = { x: 62, y: 64, z: 57 };
-const menuWorld = new World('240913', 5).generate();
+const menuWorld = new World(menuSeed, 5).generate();
 view.attach(menuWorld, menuCenter); view.mobSystem = null;
 $('#bestiary-list').innerHTML = MOB_LIST.map(m => `<article><div>${icon(`${m.id}_spawn_egg`)}</div><strong>${m.name}</strong><span>${m.health} HP · ${m.habitat}</span><small>${m.drops.map(d => ITEMS[d.id].name).join(', ') || 'No item drops'}</small></article>`).join('');
 createIcons({ icons });
-refreshSaves(); requestAnimationFrame(frame);
+refreshSaves();
+// Automation hook: the smoke tests and dev tools read the live world/state through this.
+Object.defineProperty(window, '__blockbound', { get: () => state });
+requestAnimationFrame(frame);

@@ -50,7 +50,45 @@ export class WorldSystems {
   track(index) {
     const def = BLOCKS[typeof index === 'number' ? this.world.blocks[index] : this.world.blockAt(index)];
     if (def?.station || def?.container || def?.redstone || /door|gate|bulb|lamp|tnt|note_block|jukebox|beehive|bee_nest|potent_sulfur|respawn_anchor/.test(def?.reference || '')) this.active.set(index, def.reference);
+    else if (def?.fire || def?.reference === 'fire') this.active.set(index, 'fire');
     else this.active.delete(index);
+  }
+  // Fire burns fuels, spreads to neighbours and goes out when it has nothing to
+  // hold on to. `life` grows while burning; flammable support keeps it alive.
+  flammable(id) {
+    const def = BLOCKS[id];
+    if (!def || !Number.isFinite(def.time)) return false;
+    return /planks|log|wood|leaves|wool|carpet|hay|bookshelf|bamboo|vine|coal_block|sculk|tnt|table|chest|barrel|crafting|sapling|flower/.test((def.reference || '') + ' ' + (def.texture || ''));
+  }
+  fireTick(index, state, dt) {
+    const w = this.world, p = position(index);
+    if (w.blockAt(index) !== B.FIRE) { this.active.delete(index); return; }
+    const s = w.stateAt(p.x, p.y, p.z), below = w.get(p.x, p.y - 1, p.z);
+    const belowSolid = isSolid(below), belowFlammable = this.flammable(below);
+    let life = (s.life || 0) + dt;
+    const adjacent = neighbors.map(([dx, dy, dz]) => ({ x: p.x + dx, y: p.y + dy, z: p.z + dz, id: w.get(p.x + dx, p.y + dy, p.z + dz) }));
+    const drowned = adjacent.some(n => n.id === B.WATER);
+    // Rain-free, water-free, with a floor: fire keeps burning on netherrack-like
+    // blocks forever and dies out on plain stone after a few seconds.
+    const anchored = belowFlammable || below === B.NETHERRACK || below === B.SOUL_SAND || below === B.MAGMA_BLOCK || adjacent.some(n => this.flammable(n.id));
+    if (drowned || !belowSolid || !anchored && life > 4 + (index % 7)) { w.set(p.x, p.y, p.z, B.AIR); this.active.delete(index); return; }
+    w.setState(p.x, p.y, p.z, { life });
+    // Damage anything standing in the flames.
+    if (Math.hypot(state.player.x - (p.x + .5), state.player.z - (p.z + .5)) < .9 && Math.abs(state.player.y - p.y) < 1) state.mobs.emit('damage', { amount: dt * 1.6, effect: 'fire' });
+    for (const mob of state.mobs.mobs) if (Math.hypot(mob.x - (p.x + .5), mob.z - (p.z + .5)) < .9 && Math.abs(mob.y - p.y) < 1.2 && !MOBS[mob.type]?.fireproof) state.mobs.hurt(mob, dt * 1.6, 'fire');
+    // Spread: fire creeps into the air next to fuel and eats the fuel itself.
+    const beat = Math.floor(this.clock * 2);
+    const roll = (x, y, z) => ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791) ^ Math.imul(beat, 2654435761)) >>> 0) % 100;
+    for (const n of adjacent) {
+      if (!w.inside(n.x, n.y, n.z)) continue;
+      if (n.id === B.AIR) {
+        const touching = neighbors.some(([dx, dy, dz]) => this.flammable(w.get(n.x + dx, n.y + dy, n.z + dz)));
+        const chance = Math.min(40, life * 6) * (belowFlammable ? 1.5 : 1);
+        if (touching && roll(n.x, n.y, n.z) < chance) w.set(n.x, n.y, n.z, B.FIRE);
+      } else if (this.flammable(n.id) && life > 1.5 && roll(n.x, n.y + 1, n.z) < 18) {
+        w.set(n.x, n.y, n.z, B.FIRE);
+      }
+    }
   }
   machine(index, state = null) {
     const block = this.world.blockAt(index), def = BLOCKS[block];
@@ -218,6 +256,19 @@ export class WorldSystems {
         if (this.active.get(target) === 'redstone_wire' && level > 1) source(target, from === 'redstone_wire' ? level - 1 : level);
       }
     }
+    // Weak power: a component that is switched on powers the solid block it is
+    // attached to, so a torch hanging off that block can be extinguished.
+    const blockPower = new Map();
+    for (const [index, level] of levels) {
+      const name = this.active.get(index);
+      if (!name || name === 'redstone_wire' || name === 'redstone_torch') continue;
+      const source = position(index);
+      for (const [dx, dy, dz] of neighbors) {
+        const target = w.index(source.x + dx, source.y + dy, source.z + dz);
+        if (w.inside(source.x + dx, source.y + dy, source.z + dz)) blockPower.set(target, Math.max(blockPower.get(target) || 0, level));
+      }
+    }
+    const powerAt = index => Math.max(levels.get(index) || 0, blockPower.get(index) || 0);
     for (const [index, name] of this.active) {
       const p = position(index), s = w.stateAt(p.x, p.y, p.z);
       if (!near(p, state.player, 80)) continue;
@@ -229,7 +280,14 @@ export class WorldSystems {
         if (input !== s.input) w.setState(p.x, p.y, p.z, { input, changeAt: this.clock + (s.delay || .1) });
         else if ((s.changeAt || 0) <= this.clock) w.setState(p.x, p.y, p.z, { output: name === 'repeater' ? input ? 15 : 0 : input });
       }
-      if (name === 'redstone_torch') { const [dx, , dz] = directions[s.facing || 0]; w.setState(p.x, p.y, p.z, { disabled: (levels.get(w.index(p.x - dx, p.y, p.z - dz)) || 0) > 0 }); }
+      if (name === 'redstone_torch') {
+        // Standing torches are held up by the block below, wall torches by the
+        // block they are mounted on (`facing` points into that wall).
+        const [dx, , dz] = directions[s.facing || 0];
+        const support = s.wall ? { x: p.x + dx, y: p.y, z: p.z + dz } : { x: p.x, y: p.y - 1, z: p.z };
+        const powered = w.inside(support.x, support.y, support.z) && powerAt(w.index(support.x, support.y, support.z)) > 0;
+        if (!!s.disabled !== powered) w.setState(p.x, p.y, p.z, { disabled: powered, lit: !powered });
+      }
       if (/door|fence_gate/.test(name) && (powered || s.power)) { w.setState(p.x, p.y, p.z, { open: powered }); if (BLOCKS[w.get(p.x, p.y + 1, p.z)]?.shape === 'door') w.setState(p.x, p.y + 1, p.z, { open: powered }); }
       if (name.includes('copper_bulb') && rising) w.setState(p.x, p.y, p.z, { lit: !s.lit });
       if (name === 'redstone_lamp') w.setState(p.x, p.y, p.z, { lit: powered });
@@ -255,7 +313,9 @@ export class WorldSystems {
     }
   }
   toggle(hit) {
-    const def = BLOCKS[hit.id], name = def.reference, w = this.world, s = w.stateAt(hit.x, hit.y, hit.z);
+    const def = BLOCKS[hit.id];
+    if (!def) return { handled: false };            // unknown / air ids must not throw
+    const name = def.reference || '', w = this.world, s = w.stateAt(hit.x, hit.y, hit.z);
     if (['door', 'gate', 'trapdoor'].includes(def.shape)) {
       if (/iron|copper/.test(name)) return { handled: true, message: 'Requires redstone power' };
       w.setState(hit.x, hit.y, hit.z, { open: !s.open });
@@ -279,6 +339,7 @@ export class WorldSystems {
       if (m.station === 'brew') this.processBrewing(m, dt);
     }
     this.redstone(state);
+    for (const [index, name] of this.active) if (name === 'fire') this.fireTick(index, state, dt);
     for (const [index, name] of this.active) if (name === 'hopper') {
       const p = position(index); if (this.world.stateAt(p.x, p.y, p.z).power) continue;
       if (!near(p, state.player, 80)) continue;

@@ -33,6 +33,8 @@ try {
   }
   await page.screenshot({ path: 'artifacts/home-desktop.png' });
   console.log('Home loaded', await page.title());
+  // The menu prefills a fresh random seed each visit, so pin one for a stable layout.
+  await page.fill('#seed-input', '999');
   await page.getByRole('button', { name: 'CREATE A WORLD' }).click();
   await page.locator('#loading').waitFor({ state: 'hidden' });
   await page.locator('#target-label').filter({ hasText: 'Oak log' }).waitFor({ timeout: 15000 });
@@ -99,6 +101,8 @@ try {
   await page.getByRole('button', { name: 'Save & return home', exact: true }).click();
   await page.locator('[data-mode="creative"]').click();
   await page.locator('#seed-input').fill('78209632');
+  // The menu prefills a fresh random seed each visit, so pin one for a stable layout.
+  await page.fill('#seed-input', '999');
   await page.getByRole('button', { name: 'CREATE A WORLD' }).click();
   await page.locator('#loading').waitFor({ state: 'hidden' });
   await page.keyboard.press('e');
@@ -137,10 +141,17 @@ try {
   const captured = await browser.newContext({ viewport: { width: 960, height: 640 } });
   const capturePage = await captured.newPage(); capturePage.on('pageerror', e => errors.push(e.message));
   await capturePage.goto(gameUrl, { waitUntil: 'networkidle' });
+  await capturePage.fill('#seed-input', '999');
   await capturePage.getByRole('button', { name: 'CREATE A WORLD' }).click();
   await capturePage.locator('#loading').waitFor({ state: 'hidden' });
+  // Pointer lock needs the window focused, which a fresh context is not in headless runs.
+  await capturePage.bringToFront();
   await capturePage.mouse.move(480, 320); await capturePage.mouse.down();
   await capturePage.waitForFunction(() => !!document.pointerLockElement);
+  // Headless Chromium reports no pointer-lock movement, so settle the aim directly on the
+  // ground; the point of this pass is the held-click mining path under native capture.
+  await capturePage.evaluate(() => { const s = window.__blockbound; s.player.pitch = -1.2; s.player.yaw = s.world.spawnYaw ?? s.player.yaw; });
+  await capturePage.waitForFunction(() => document.querySelector('#target-label').textContent.length > 0, null, { timeout: 20000 });
   await capturePage.waitForFunction(() => document.querySelector('#save-status').textContent === 'Unsaved changes');
   await capturePage.mouse.up();
   console.log('Native pointer capture and held-click mining passed');

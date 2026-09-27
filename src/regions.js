@@ -3,7 +3,7 @@ import { SIZE, HEIGHT, SEA, hash, noise, clamp } from './world.js';
 import { terrainColumn, caveBiome } from './terrain.js';
 
 export const DIMENSIONS = ['overworld', 'nether', 'end'];
-export const OVERWORLD_BIOMES = ['plains', 'forest', 'taiga', 'jungle', 'desert', 'badlands', 'savanna', 'swamp', 'mangrove_swamp', 'mountains', 'snowy_plains', 'cherry_grove', 'pale_garden', 'old_growth_taiga', 'snowy_taiga', 'meadow', 'birch_forest', 'stony_peaks', 'flower_forest', 'frozen_river'];
+export const OVERWORLD_BIOMES = ['plains', 'forest', 'taiga', 'jungle', 'desert', 'badlands', 'savanna', 'swamp', 'mangrove_swamp', 'mountains', 'snowy_plains', 'cherry_grove', 'pale_garden', 'old_growth_taiga', 'snowy_taiga', 'meadow', 'birch_forest', 'stony_peaks', 'flower_forest', 'frozen_river', 'mushroom_fields'];
 export const NETHER_BIOMES = ['nether_wastes', 'soul_sand_valley', 'crimson_forest', 'warped_forest', 'basalt_deltas'];
 export const END_BIOMES = ['the_end', 'end_highlands', 'end_midlands', 'end_barrens', 'small_end_islands'];
 export const STRUCTURE_TYPES = [
@@ -173,7 +173,7 @@ export function generateStructures(world, candidates = null) {
         world.generatedState(x + dx + 2, y + 1, z + dz, { upper: true }); set(world, x + dx + 1, y, z + dz + 4, B.RED_BED);
       }
       fill(world, x + 1, y - 1, z - 6, 2, 1, 17, B.DIRT_PATH); set(world, x, y, z, B.BELL); set(world, x - 4, y, z - 1, B.TABLE); set(world, x + 4, y, z - 1, B.FURNACE);
-      chest(world, x - 3, y, z + 7, [['bread', 5], ['iron', 3], ['emerald', 2], ['map', 1]]); spawns('villager', 'villager', 'iron_golem');
+      chest(world, x - 3, y, z + 7, [['bread', 5], ['iron', 3], ['emerald', 2], ['map', 1]]); spawns('villager', 'villager', 'iron_golem', 'camel');
     } else if (id === 'desert_pyramid') {
       for (let level = 0; level < 7; level++) fill(world, x - 7 + level, y + level, z - 7 + level, 15 - level * 2, 1, 15 - level * 2, B.SANDSTONE);
       room(world, x - 3, y, z - 3, 7, 4, 7, B.CUT_SANDSTONE, B.CHISELED_SANDSTONE, B.SANDSTONE);
@@ -186,13 +186,13 @@ export function generateStructures(world, candidates = null) {
       room(world, x - 7, y, z - 7, 15, 5, 15, B.DARK_OAK_PLANKS, B.COBBLESTONE); room(world, x - 7, y + 6, z - 7, 15, 5, 15, B.DARK_OAK_PLANKS, B.DARK_OAK_PLANKS, B.DARK_OAK_PLANKS);
       for (const dx of [-4, 0, 4]) for (const dy of [2, 8]) fill(world, x + dx, y + dy, z - 7, 2, 2, 1, B.GLASS);
       for (let i = 0; i < 6; i++) fill(world, x - 5, y + i, z + i - 4, 2, 1, 1, B.DARK_OAK_STAIRS);
-      chest(world, x + 4, y + 6, z + 4, [['totem', 1], ['diamond_axe', 1], ['vex_armor_trim_smithing_template', 1]]); spawns('vindicator', 'evoker');
+      chest(world, x + 4, y + 6, z + 4, [['totem', 1], ['diamond_axe', 1], ['vex_armor_trim_smithing_template', 1]]); spawns('vindicator', 'evoker', 'vex');
     } else if (id === 'ocean_monument' || id === 'ocean_ruins') {
       const radius = id === 'ocean_monument' ? 7 : 4;
       if (!candidates) fill(world, x - radius - 2, y - 2, z - radius - 2, radius * 2 + 5, 7, radius * 2 + 5, B.WATER);
       room(world, x - radius, y, z - radius, radius * 2 + 1, 5, radius * 2 + 1, B.PRISMARINE_BRICKS, B.DARK_PRISMARINE, B.PRISMARINE);
       fill(world, x - radius + 1, y, z - radius + 1, radius * 2 - 1, 4, radius * 2 - 1, B.WATER);
-      set(world, x, y + 5, z, B.SEA_LANTERN); chest(world, x + 2, y, z + 2, [['prismarine_shard', 12], ['heart_of_the_sea', 1], ['sponge', 2]]); spawns(id === 'ocean_monument' ? 'elder_guardian' : 'drowned');
+      set(world, x, y + 5, z, B.SEA_LANTERN); chest(world, x + 2, y, z + 2, [['prismarine_shard', 12], ['heart_of_the_sea', 1], ['sponge', 2]]); spawns(id === 'ocean_monument' ? 'elder_guardian' : 'drowned', id === 'ocean_monument' ? 'guardian' : 'drowned');
     } else if (id === 'shipwreck') {
       for (let dy = 0; dy < 3; dy++) fill(world, x - 3 - dy, y + dy, z - 3, 7 + dy * 2, 1, 7, B.SPRUCE_PLANKS);
       fill(world, x - 4, y + 3, z - 2, 9, 1, 5, B.AIR); fill(world, x, y + 3, z, 1, 8, 1, B.SPRUCE_LOG); fill(world, x + 1, y + 7, z, 4, 3, 1, B.WOOL);
@@ -201,7 +201,7 @@ export function generateStructures(world, candidates = null) {
     else if (id.includes('ruined_portal')) { fill(world, x - 3, y - 1, z - 2, 10, 1, 6, B.NETHERRACK); makePortal(world, x - 1, y, z, B.NETHER_PORTAL, false); set(world, x + 2, y + 4, z, B.AIR); chest(world, x - 2, y, z + 2, [['obsidian', 4], ['flint_steel', 1], ['gold', 5]]); }
     else if (id === 'pillager_outpost') {
       room(world, x - 3, y, z - 3, 7, 8, 7, B.DARK_OAK_LOG, B.COBBLESTONE, B.DARK_OAK_PLANKS); fill(world, x - 4, y + 6, z - 4, 9, 1, 9, B.DARK_OAK_PLANKS);
-      chest(world, x + 1, y + 7, z + 1, [['crossbow', 1], ['arrow', 16], ['sentry_armor_trim_smithing_template', 1]]); spawns('pillager', 'pillager');
+      chest(world, x + 1, y + 7, z + 1, [['crossbow', 1], ['arrow', 16], ['sentry_armor_trim_smithing_template', 1]]); spawns('pillager', 'pillager', 'ravager');
     } else if (id === 'stronghold') {
       room(world, x - 6, y, z - 6, 13, 6, 13, B.STONE_BRICKS, B.MOSSY_STONE_BRICKS);
       for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) if ((Math.abs(dx) === 2) !== (Math.abs(dz) === 2)) set(world, x + dx, y, z + dz, B.END_PORTAL_FRAME);
@@ -213,7 +213,7 @@ export function generateStructures(world, candidates = null) {
     } else if (id === 'trial_chambers') {
       room(world, x - 6, y, z - 6, 13, 6, 13, B.TUFF_BRICKS, B.POLISHED_TUFF, B.CHISELED_COPPER);
       for (const dx of [-4, 4]) for (const dz of [-4, 4]) { fill(world, x + dx, y, z + dz, 1, 5, 1, B.CUT_COPPER); set(world, x + dx, y + 4, z + dz, B.COPPER_BULB); }
-      chest(world, x + 4, y, z + 4, [['breeze_rod', 3], ['mace', 1], ['wind_charge', 12]]); spawns('breeze', 'bogged');
+      chest(world, x + 4, y, z + 4, [['breeze_rod', 3], ['mace', 1], ['wind_charge', 12]]); spawns('breeze', 'bogged', 'allay');
     } else if (id === 'mineshaft') {
       fill(world, x - 10, y, z - 2, 21, 4, 5, B.AIR); fill(world, x - 10, y - 1, z - 2, 21, 1, 5, B.PLANKS);
       for (let dx = -9; dx <= 9; dx++) { set(world, x + dx, y, z, B.RAIL); if (dx % 4 === 0) { fill(world, x + dx, y, z - 2, 1, 3, 1, B.OAK_FENCE); fill(world, x + dx, y, z + 2, 1, 3, 1, B.OAK_FENCE); fill(world, x + dx, y + 3, z - 2, 1, 1, 5, B.PLANKS); } }
@@ -223,7 +223,7 @@ export function generateStructures(world, candidates = null) {
     else if (id === 'witch_hut') { for (const dx of [-3, 3]) for (const dz of [-3, 3]) fill(world, x + dx, y - 2, z + dz, 1, 3, 1, B.SPRUCE_LOG); room(world, x - 3, y + 1, z - 3, 7, 3, 7, B.SPRUCE_PLANKS); set(world, x + 1, y + 1, z + 1, B.CAULDRON); set(world, x - 1, y + 1, z + 1, B.BREWING_STAND); spawns('witch', 'cat'); }
     else if (id === 'trail_ruins') { for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) for (let dy = -3; dy <= 2; dy++) set(world, x + dx, y + dy, z + dz, hash(dx, dy, dz, world.number) < .25 ? B.SUSPICIOUS_GRAVEL : [B.TERRACOTTA, B.BRICKS, B.PACKED_MUD][(dx + dz + dy + 12) % 3]); chest(world, x, y - 2, z, [['angler_pottery_sherd', 2], ['resin_clump', 5], ['wayfinder_armor_trim_smithing_template', 1]]); }
     else if (id === 'nether_fortress') { room(world, x - 5, y, z - 5, 11, 6, 11, B.NETHER_BRICKS); fill(world, x - 14, y - 1, z - 1, 29, 1, 3, B.NETHER_BRICKS); fill(world, x - 1, y - 1, z - 14, 3, 1, 29, B.NETHER_BRICKS); chest(world, x + 3, y, z + 3, [['nether_wart', 8], ['blaze_rod', 3], ['gold', 8]]); spawns('blaze', 'wither_skeleton'); }
-    else if (id === 'bastion_remnant') { room(world, x - 7, y, z - 7, 15, 9, 15, B.POLISHED_BLACKSTONE_BRICKS, B.BLACKSTONE); fill(world, x - 3, y, z + 3, 7, 2, 2, B.GOLD_BLOCK); chest(world, x, y + 2, z + 3, [['netherite_upgrade_smithing_template', 1], ['netherite_scrap', 4], ['gold', 12]]); spawns('piglin_brute', 'piglin'); }
+    else if (id === 'bastion_remnant') { room(world, x - 7, y, z - 7, 15, 9, 15, B.POLISHED_BLACKSTONE_BRICKS, B.BLACKSTONE); fill(world, x - 3, y, z + 3, 7, 2, 2, B.GOLD_BLOCK); chest(world, x, y + 2, z + 3, [['netherite_upgrade_smithing_template', 1], ['netherite_scrap', 4], ['gold', 12]]); spawns('piglin_brute', 'piglin', 'happy_ghast'); }
     else if (id === 'end_city') { for (let dy = 0; dy < 15; dy += 5) room(world, x - 3, y + dy, z - 3, 7, 4, 7, B.PURPUR_BLOCK, B.PURPUR_PILLAR, B.PURPUR_SLAB); for (let i = 0; i < 12; i++) set(world, x - 2 + i % 4, y + i, z - 2 + Math.floor(i / 4), B.PURPUR_STAIRS); set(world, x, y + 16, z, B.END_ROD); chest(world, x + 1, y + 11, z + 1, [['elytra', 1], ['shulker_shell', 4], ['diamond_sword', 1]]); spawns('shulker', 'enderman'); }
   }
 }
