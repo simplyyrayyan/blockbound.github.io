@@ -12,7 +12,9 @@ export function miningInfo(id, item, creative = false) {
     const tier = ['', 'wooden', 'stone', 'iron', 'diamond'][block.tier];
     return { ok: false, reason: `Needs a ${tier} pickaxe` };
   }
-  const speed = tool?.tool === block.tool ? (tool.speed || 1) + enchantLevel(item, 'efficiency') ** 2 : 1;
+  // An empty hand (or a held item with no tool tag) must compare false even when
+  // the block itself has no tool requirement, otherwise `tool.speed` throws.
+  const speed = tool && tool.tool === block.tool ? (tool.speed || 1) + enchantLevel(item, 'efficiency') ** 2 : 1;
   return { ok: true, time: block.time / speed };
 }
 

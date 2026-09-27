@@ -1,4 +1,4 @@
-import { B, ITEMS, isSolid } from './catalog.js';
+import { B, BLOCKS, ITEMS, isSolid } from './catalog.js';
 import { MOBS } from './mob-catalog.js';
 import { clamp, collides, SIZE } from './world.js';
 import { useExtendedItem, applyEffect } from './extended-actions.js';
@@ -56,7 +56,10 @@ export function hitPlayer(state, amount, effect = null) {
 export function attackMob(state, mob, direction) {
   if (state.attackCooldown > 0) return false;
   const held = state.inventory.slots[state.selected], def = ITEMS[held?.id];
-  const range = Math.hypot(mob.x - state.player.x, mob.z - state.player.z);
+  // Reach is measured to the edge of the hitbox, not its centre, so knockback
+  // cannot silently push a mob out of range.
+  const body = (MOBS[mob.type]?.width || .6) * (mob.scale || 1) / 2;
+  const range = Math.max(0, Math.hypot(mob.x - state.player.x, mob.z - state.player.z) - body);
   if (range > (def?.reach || 3.4)) return false;
   if (def?.weapon === 'spear' && (range < 2 || range > 4.7)) return false;
   state.attackCooldown = def?.cooldown || .5;
@@ -129,7 +132,9 @@ export function useItem(state, hit, direction, entity = null) {
     if (!hit) return done('Aim at a surface within reach');
     const spot = { ...p, x: hit.adjacent.x + .5, y: hit.adjacent.y, z: hit.adjacent.z + .5 };
     if (collides(state.world, spot)) return done('No safe landing space');
-    Object.assign(p, spot, { vy: 0 }); consumeHeld(state); system.emit('damage', { amount: 3 }); return done('');
+    Object.assign(p, spot, { vy: 0 }); consumeHeld(state); system.emit('damage', { amount: 3 });
+    if (system.roll() < .05) { const result = system.spawn('endermite', { x: p.x, y: p.y, z: p.z }); if (result.ok) return done('An endermite crawls out of the pearl'); }
+    return done('');
   }
   if (def?.action === 'horn') {
     for (const m of system.mobs) if (m.tamed) { m.sitting = false; m.leashed = true; }
@@ -143,16 +148,35 @@ export function useItem(state, hit, direction, entity = null) {
     return done(result.ok ? 'Wither summoned' : result.reason);
   }
   if (def?.action === 'ignite') {
-    if (hit?.id === B.TNT && system.projectiles.length < 96) {
+    if (!hit) return done('Aim at a block to light');
+    const adjacent = hit.adjacent, space = state.world.get(adjacent.x, adjacent.y, adjacent.z);
+    // Flint and steel lights campfires and candles that are already lit-able blocks.
+    if ([B.CAMPFIRE, B.SOUL_CAMPFIRE, B.CANDLE].includes(hit.id)) {
+      if (state.world.stateAt(hit.x, hit.y, hit.z).lit) return done('Already lit');
+      state.world.setState(hit.x, hit.y, hit.z, { lit: true }); consumeHeld(state); return done('Lit');
+    }
+    if (hit.id === B.TNT && system.projectiles.length < 96) {
       state.world.set(hit.x, hit.y, hit.z, B.AIR); consumeHeld(state);
       system.projectiles.push({ uid: ++system.serial, type: 'tnt', x: hit.x + .5, y: hit.y + .5, z: hit.z + .5, life: 3, owner: 'player' }); return done('TNT ignited');
     }
-    return done('Aim at TNT');
+    // Otherwise place fire in the empty space the crosshair points at, exactly
+    // like Minecraft: any solid block face works, soul sand gets soul fire.
+    if (space !== B.AIR && space !== B.FIRE) return done('Nothing to light there');
+    if (!state.world.inside(adjacent.x, adjacent.y, adjacent.z)) return done('Nothing to light there');
+    const support = BLOCKS[hit.id];
+    if (!isSolid(hit.id) || !Number.isFinite(support?.time)) return done('That will not burn');
+    const sameSpot = adjacent.x === Math.floor(p.x) && adjacent.z === Math.floor(p.z) && (adjacent.y === Math.floor(p.y) || adjacent.y === Math.floor(p.y + 1));
+    if (sameSpot) return done('Step back to light this');
+    state.world.set(adjacent.x, adjacent.y, adjacent.z, B.FIRE);
+    consumeHeld(state);
+    return done('Fire lit');
   }
   if (def?.action === 'egg') { if (hit && system.roll() < .25) system.spawn('chicken', { x: hit.adjacent.x + .5, y: hit.adjacent.y, z: hit.adjacent.z + .5 }, { baby: true, scale: .5 }); consumeHeld(state); system.shoot('snowball', from, to, 'player', 0); return done(''); }
   if (['bucket', 'bottle', 'fish'].includes(def?.action)) {
     let water = null;
-    for (let step = 0; step < 7; step += .15) {
+    // Walk the aim ray out to normal interaction reach (6 blocks) so a source
+    // block a couple of steps away can be filled from, like Minecraft.
+    for (let step = 0; step <= 6; step += .25) {
       const spot = { x: Math.floor(from.x + direction.x * step), y: Math.floor(from.y + direction.y * step), z: Math.floor(from.z + direction.z * step) };
       const id = state.world.get(spot.x, spot.y, spot.z);
       if ([B.WATER, B.LAVA].includes(id)) { water = { ...spot, id }; break; }

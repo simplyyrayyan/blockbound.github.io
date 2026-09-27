@@ -164,7 +164,13 @@ for (const [id, name, color, effect] of [
 
 export function contentRecipes() {
   const recipes = [];
-  const add = (id, needs, count = 1, table = true) => recipes.push({ id, needs, count, table, pattern: Object.entries(needs).flatMap(([key, n]) => Array(Math.min(n, 9)).fill(key)).slice(0, 9), note: '' });
+  // Shapeless recipes are laid out two cells wide so anything with four or
+  // fewer items can still be made in the 2x2 hand grid.
+  const layout = ids => { const pattern = Array(9).fill(null); if (ids.length <= 4) ids.forEach((id, i) => { pattern[Math.floor(i / 2) * 3 + i % 2] = id; }); else ids.slice(0, 9).forEach((id, i) => { pattern[i] = id; }); return pattern; };
+  const add = (id, needs, count = 1, table = true) => {
+    const items = Object.entries(needs).flatMap(([key, n]) => Array(Math.min(n, 9)).fill(key)).slice(0, 9);
+    recipes.push({ id, needs, count, table: table || items.length > 4, pattern: layout(items), note: '' });
+  };
   for (const tree of ['birch', 'cherry', 'spruce']) { add(`${tree}_planks`, { [`${tree}_log`]: 1 }, 4, false); add('stick', { [`${tree}_planks`]: 2 }, 4, false); }
   for (const [id, def] of Object.entries(EXTRA_ITEMS)) {
     if (def.ingredient && def.armorSlot) add(id, { [def.ingredient]: { helmet: 5, chestplate: 8, leggings: 7, boots: 4 }[def.armorSlot] });
@@ -173,7 +179,7 @@ export function contentRecipes() {
   for (const [raw, cooked] of [['raw_beef', 'steak'], ['raw_porkchop', 'cooked_porkchop'], ['raw_chicken', 'cooked_chicken'], ['raw_mutton', 'cooked_mutton'], ['raw_rabbit', 'cooked_rabbit'], ['cod', 'cooked_cod'], ['salmon', 'cooked_salmon'], ['potato', 'baked_potato']]) add(cooked, { [raw]: 1, coal: 1 });
   for (const [id, needs, count = 1, table = true] of [
     ['bow', { stick: 3, string: 3 }], ['crossbow', { stick: 3, string: 2, iron: 1 }], ['arrow', { flint: 1, stick: 1, feather: 1 }, 4],
-    ['trident', { prismarine_shard: 6, diamond: 2, stick: 2 }], ['mace', { breeze_rod: 2, iron_block: 1 }],
+    ['mace', { breeze_rod: 2, iron_block: 1 }],
     ['shield', { planks: 6, iron: 1 }], ['saddle', { leather: 5, iron: 2 }], ['shears', { iron: 2 }], ['brush', { feather: 1, copper: 1, stick: 1 }],
     ['bucket', { iron: 3 }], ['glass_bottle', { glass: 3 }, 3], ['bowl', { planks: 3 }, 4, false], ['fishing_rod', { stick: 3, string: 2 }],
     ['lead', { string: 4, slime_ball: 1 }, 2], ['flint_steel', { flint: 1, iron: 1 }], ['wolf_armor', { armadillo_scute: 6 }],
@@ -186,7 +192,7 @@ export function contentRecipes() {
     ['netherite_ingot', { netherite_scrap: 4, gold: 4 }], ['netherite_scrap', { obsidian: 4, blaze_powder: 2 }],
     ['red_dye', { flower: 1 }, 2, false], ['blue_dye', { lapis: 1 }, 2, false], ['green_dye', { cactus: 1, coal: 1 }],
     ['red_wool', { wool: 1, red_dye: 1 }], ['blue_wool', { wool: 1, blue_dye: 1 }], ['green_wool', { wool: 1, green_dye: 1 }], ['wool', { string: 4 }],
-    ['hay', { wheat: 9 }], ['snow', { snowball: 4 }], ['terracotta', { clay_ball: 4, coal: 1 }], ['cobblestone', { stone: 1 }, 1, false],
+    ['hay', { wheat: 9 }], ['snow', { snowball: 4 }], ['terracotta', { clay_ball: 4, coal: 1 }],
     ['bookshelf', { planks: 6, book: 3 }], ['paper', { bamboo: 3 }, 3], ['book', { paper: 3, leather: 1 }],
     ['tnt', { gunpowder: 5, sand: 4 }], ['prismarine', { prismarine_shard: 4 }], ['sea_lantern', { prismarine_shard: 4, prismarine_crystal: 5 }],
     ['glowstone', { glowstone_dust: 4 }], ['quartz_block', { quartz: 4 }], ['amethyst_block', { amethyst: 4 }],
@@ -198,5 +204,16 @@ export function contentRecipes() {
     ['slow_falling_potion', { glass_bottle: 1, phantom_membrane: 1 }], ['poison_potion', { glass_bottle: 1, spider_eye: 1 }],
     ['amethyst', { shulker_shell: 1 }, 4], ['quartz', { diorite: 1 }, 2],
   ]) add(id, needs, count, table);
+  // Shaped recipes that must not be confused with a simpler one in the same grid.
+  // Stacked stone turns into cobblestone; a horizontal pair stays a pressure plate.
+  recipes.push({
+    id: 'cobblestone', count: 2, needs: { stone: 2 }, table: false, shapeless: false,
+    pattern: ['stone', null, null, 'stone'], note: 'Stack stone to break it into cobblestone.',
+  });
+  recipes.push({
+    id: 'trident', count: 1, needs: { prismarine_shard: 5, diamond: 1, stick: 1 }, table: true,
+    pattern: ['prismarine_shard', 'diamond', 'prismarine_shard', 'prismarine_shard', 'prismarine_shard', 'prismarine_shard', null, 'stick', null],
+    note: 'Three prongs of prismarine around a diamond core.',
+  });
   return recipes;
 }

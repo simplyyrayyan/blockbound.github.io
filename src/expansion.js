@@ -199,6 +199,7 @@ export function registerExpansion(B, BLOCKS, ITEMS, RECIPES, mobs) {
   ITEMS.tipped_arrow.arrowEffect = 'poison';
   for (const [id, effect] of [['enchanted_golden_apple', 'enchanted_apple'], ['poisonous_potato', 'poison'], ['suspicious_stew', 'night_vision'], ['chorus_fruit', 'chorus']]) if (ITEMS[id]) ITEMS[id].effect = effect;
   // Stable old recipes stay first; the canonical book adds all material variants.
+  const zigzag = ids => { const pattern = Array(9).fill(null); if (ids.length <= 4) ids.forEach((id, i) => { pattern[Math.floor(i / 2) * 3 + i % 2] = id; }); else ids.slice(0, 9).forEach((id, i) => { pattern[i] = id; }); return pattern; };
   const known = new Set(RECIPES.map(r => `${r.id}:${JSON.stringify(r.needs)}`));
   for (const r of reference.recipes) {
     const id = canonicalItem(r.id), cells = r.pattern?.map(row => row.map(v => v ? canonicalItem(v) : null));
@@ -207,19 +208,31 @@ export function registerExpansion(B, BLOCKS, ITEMS, RECIPES, mobs) {
     for (const i of ingredients) needs[i] = (needs[i] || 0) + 1;
     const existing = RECIPES.find(old => old.id === id && Object.keys(old.needs).length === Object.keys(needs).length && Object.entries(needs).every(([item, count]) => old.needs[item] === count));
     if (existing) {
-      existing.pattern = cells ? Array.from({ length: 9 }, (_, i) => cells[Math.floor(i / 3)]?.[i % 3] || null) : [...ingredients, ...Array(9).fill(null)].slice(0, 9);
+      existing.pattern = cells ? Array.from({ length: 9 }, (_, i) => cells[Math.floor(i / 3)]?.[i % 3] || null) : zigzag(ingredients);
       existing.shapeless = !cells;
       existing.table = cells ? cells.length > 2 || cells.some(row => row.length > 2) : ingredients.length > 4;
+      if (ingredients.length > 4) existing.table = true;
       continue;
     }
     const key = `${id}:${JSON.stringify(needs)}`; if (known.has(key)) continue; known.add(key);
-    const pattern = cells ? Array.from({ length: 9 }, (_, i) => cells[Math.floor(i / 3)]?.[i % 3] || null) : [...ingredients, ...Array(9).fill(null)].slice(0, 9);
+    const pattern = cells ? Array.from({ length: 9 }, (_, i) => cells[Math.floor(i / 3)]?.[i % 3] || null) : zigzag(ingredients);
     RECIPES.push({ id, count: r.count, needs, pattern, table: cells ? cells.length > 2 || cells.some(row => row.length > 2) : ingredients.length > 4, shapeless: !cells, note: '' });
   }
   const addRecipe = (id, needs, count = 1) => RECIPES.push({ id, needs, count, table: true, pattern: Object.entries(needs).flatMap(([key, n]) => Array(Math.min(n, 9)).fill(key)).slice(0, 9), shapeless: true, note: '' });
+  // Shaped variants need a real pattern: stairs, slabs and walls share the same
+  // ingredient totals, so only the layout tells them apart.
+  const addShaped = (id, ingredient, count, rows) => {
+    const pattern = Array.from({ length: 9 }, (_, i) => rows[Math.floor(i / 3)]?.[i % 3] ? ingredient : null);
+    RECIPES.push({ id, needs: { [ingredient]: rows.flat().filter(Boolean).length }, count, table: true, pattern, shapeless: false, note: '' });
+  };
   for (const material of ['cinnabar', 'sulfur']) {
     addRecipe(`polished_${material}`, { [material]: 4 }, 4); addRecipe(`${material}_bricks`, { [`polished_${material}`]: 4 }, 4); addRecipe(`chiseled_${material}`, { [`${material}_slab`]: 2 });
-    for (const base of [material, `polished_${material}`, `${material}_bricks`]) for (const [suffix, cost, count] of [['stairs', 6, 4], ['slab', 3, 6], ['wall', 6, 6]]) addRecipe(`${base.replace(/bricks$/, 'brick')}_${suffix}`, { [base]: cost }, count);
+    for (const base of [material, `polished_${material}`, `${material}_bricks`]) {
+      const name = `${base.replace(/bricks$/, 'brick')}`;
+      addShaped(`${name}_stairs`, base, 4, [[1, 1, 1], [1, 1, 0], [1, 0, 0]]);
+      addShaped(`${name}_slab`, base, 6, [[1, 1, 1], [0, 0, 0], [0, 0, 0]]);
+      addShaped(`${name}_wall`, base, 6, [[1, 1, 1], [1, 1, 1], [0, 0, 0]]);
+    }
   }
   addRecipe('potent_sulfur', { sulfur: 9 }); addRecipe('sulfur', { sulfur_spike: 4 });
   addRecipe('large_chest', { chest: 2 });

@@ -126,7 +126,9 @@ test('v5 structures respect biome, ocean depth, ground support, and End island r
       seenTypes.add(s.id); assert.equal(s.dimension, dimension);
       if (STRUCTURE_BIOMES[s.id]) assert.ok(STRUCTURE_BIOMES[s.id].includes(s.biome), s.id);
       if (s.id === 'ocean_monument') assert.ok(s.y + 5 < w.seaLevel);
-      if (s.id === 'end_city') assert.ok(Math.hypot(s.x - 48, s.z - 48) >= 180);
+      // End cities sit in the outer islands: past the 16-block void gap that
+      // follows the central island (which ends 96 blocks from the middle).
+      if (s.id === 'end_city') assert.ok(Math.hypot(s.x - 48, s.z - 48) >= 116);
       if (s.underground) assert.ok(s.y + 7 < terrainColumn(w, s.x, s.z).h);
     }
   }

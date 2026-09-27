@@ -174,11 +174,82 @@ export class World {
   tickFluids(limit = 96, player = null) { this.seedFluids(); this.fluidTick = (this.fluidTick || 0) + 1; return tickFluids(this, limit, player); }
   waterHeight(x, y, z) { return waterHeight(this, x, y, z); }
   inWater(p) { const y = Math.floor(p.y); return p.y < y + waterHeight(this, Math.floor(p.x), y, Math.floor(p.z)); }
+  // Pick a dry, walkable spawn near the middle of the map and level a small pad
+  // so nobody wakes up inside an ocean or halfway down a cliff.
+  chooseSpawn() {
+    const sea = this.seaLevel ?? SEA;
+    let best = null;
+    const usable = (x, z) => {
+      const col = terrainColumn(this, x, z);
+      if (col.h <= sea + 1 || /ocean|river/.test(col.biome)) return null;
+      for (const [ox, oz] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) if (Math.abs(terrainColumn(this, x + ox, z + oz).h - col.h) > 4) return null;
+      // A spawn should sit on open ground, not at the foot of a cliff.
+      for (const [ox, oz] of [[6, 0], [-6, 0], [0, 6], [0, -6], [4, 4], [-4, 4], [4, -4], [-4, -4]]) {
+        const near = terrainColumn(this, x + ox, z + oz);
+        if (Math.abs(near.h - col.h) > 3 || near.h <= sea + 1 || /ocean|river/.test(near.biome)) return null;
+      }
+      return col;
+    };
+    // Look just outside the levelled clearing first so the view at spawn is the
+    // real seed; fall back to the clearing itself only on all-ocean worlds.
+    const scan = predicate => {
+      for (let r = 6; r <= 42; r += 2) for (let dx = -r; dx <= r; dx += 2) for (let dz = -r; dz <= r; dz += 2) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const col = usable(48 + dx, 48 + dz);
+        if (col && predicate(48 + dx, 48 + dz, col)) return { x: 48 + dx, z: 48 + dz, h: col.h, top: col.top };
+      }
+      return null;
+    };
+    // Woodland and plains first: a spawn with trees in sight plays like Minecraft.
+    const homely = (x, z, tier) => tier === 0
+      ? /plains|meadow|flower_forest/.test(terrainColumn(this, x, z).biome)
+      : /birch|forest|taiga|jungle/.test(terrainColumn(this, x, z).biome);
+    const spot = scan((x, z) => homely(x, z, 0)) || scan((x, z) => homely(x, z, 1)) || scan(() => true) || (() => { const c = terrainColumn(this, 48, 48); return { x: 48, z: 48, h: Math.max(c.h, sea + 1), top: B.GRASS }; })();
+    this.spawn = { x: spot.x + .5, y: spot.h + 1, z: spot.z + .5 };
+    this.spawnYaw = -.245;
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      const x = spot.x + dx, z = spot.z + dz;
+      for (let y = spot.h + 1; y <= spot.h + 4; y++) this.set(x, y, z, B.AIR);
+      this.set(x, spot.h, z, B.GRASS);
+      for (let y = spot.h - 1, filled = 0; y > 0 && filled < 4 && this.get(x, y, z) === B.AIR; y--, filled++) this.set(x, y, z, B.DIRT);
+    }
+    // A starter grove: every world hands you wood within a few steps of spawn.
+    const biome = terrainColumn(this, spot.x, spot.z).biome;
+    const species = /snow|frozen|taiga/.test(biome) ? ['SPRUCE_LOG', 'SPRUCE_LEAVES'] : /desert|badlands|savanna/.test(biome) ? ['ACACIA_LOG', 'ACACIA_LEAVES']
+      : /jungle/.test(biome) ? ['JUNGLE_LOG', 'JUNGLE_LEAVES'] : /birch/.test(biome) ? ['BIRCH_LOG', 'BIRCH_LEAVES']
+        : /cherry/.test(biome) ? ['CHERRY_LOG', 'CHERRY_LEAVES'] : /dark|pale/.test(biome) ? ['DARK_OAK_LOG', 'DARK_OAK_LEAVES'] : ['LOG', 'LEAVES'];
+    const [logId, leafId] = species.map(name => B[name] || (name.endsWith('LOG') ? B.LOG : B.LEAVES));
+    const plant = (x, z, base = terrainColumn(this, x, z).h, trunk = 5) => {
+      if (!Number.isInteger(base) || !this.inside(x, base, z) || Math.abs(base - spot.h) > 4) return false;
+      for (let y = base + 1; y <= base + trunk + 1; y++) if (![B.AIR, B.LOG, B.LEAVES].includes(this.get(x, y, z))) return false;
+      for (let y = 1; y <= trunk; y++) this.set(x, base + y, z, logId);
+      for (let dy = -2; dy <= 1; dy++) for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
+        if (Math.abs(dx) + Math.abs(dz) + Math.abs(dy) > 4) continue;
+        const y = base + trunk + dy;
+        if (this.get(x + dx, y, z + dz) === B.AIR) this.set(x + dx, y, z + dz, leafId);
+      }
+      return true;
+    };
+    const level = (x, z) => {
+      if (!this.inside(x, spot.h, z)) return;
+      for (let y = spot.h + 1; y <= spot.h + 7; y++) this.set(x, y, z, B.AIR);
+      this.set(x, spot.h, z, B.GRASS);
+      for (let y = spot.h - 1, filled = 0; y > 0 && filled < 4 && this.get(x, y, z) === B.AIR; y--, filled++) this.set(x, y, z, B.DIRT);
+    };
+    // Level a short corridor ahead so the opening view lands on the starter tree.
+    const fx = -Math.sin(this.spawnYaw), fz = -Math.cos(this.spawnYaw);
+    for (let r = 2; r <= 7; r++) for (const lateral of [-1, 0, 1]) level(Math.round(spot.x + fx * r + fz * lateral), Math.round(spot.z + fz * r - fx * lateral));
+    plant(Math.round(spot.x + fx * 5), Math.round(spot.z + fz * 5), spot.h);
+    // A handful more in the ring: enough wood for a shelter without a hike.
+    for (const [ox, oz] of [[7, 4], [-6, 6], [9, -5], [-9, -3], [4, 9], [-5, -10], [11, 3], [-12, 2]]) plant(spot.x + ox, spot.z + oz);
+  }
   generate() {
     if (this.version >= 4) {
       const lo = this.version >= 5 ? 2 : 0, hi = this.version >= 5 ? 5 : SIZE / CHUNK;
       for (let cx = lo; cx < hi; cx++) for (let cz = lo; cz < hi; cz++) this.ensureChunk(cx, cz);
-      this.spawn.y = this.version >= 5 ? terrainColumn(this, 48, 48).h + 1 : this.dimension === 'end' ? terrainColumn(this, 48, 48).h + 1 : 23;
+      if (this.version >= 5) this.chooseSpawn();
+      else this.spawn.y = this.dimension === 'end' ? terrainColumn(this, 48, 48).h + 1 : 23;
       return this;
     }
     if (this.dimension !== 'overworld') return generateDimension(this);

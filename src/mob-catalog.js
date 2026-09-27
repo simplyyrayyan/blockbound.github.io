@@ -52,7 +52,7 @@ export const MOB_LIST = [
   species('iron_golem', 'Iron Golem', 'golem', '#c8c8b7', { health: 100, damage: 12, height: 2.7, width: 1.3, temperament: 'guardian', defender: true, speed: 1.6, drops: [drop('iron', 3, 5), drop('flower', 1, 2)] }),
   species('llama', 'Llama', 'llama', '#c5b097', { ...horse, height: 1.9, speed: 2, tame: 'wheat', breed: 'hay', temperament: 'neutral', ranged: 'spit', damage: 1 }),
   species('magma_cube', 'Magma Cube', 'slime', '#622c24', { ...nether, health: 16, height: 1, width: 1, hop: true, split: true, drops: [drop('magma_cream', 1, 2)], accent: '#ffbf42' }),
-  species('mooshroom', 'Mooshroom', 'cow', '#b74639', { health: 10, height: 1.4, width: .85, milk: true, stew: true, breed: 'wheat', shear: 'mushroom', drops: [drop('raw_beef', 1, 3), drop('leather', 1, 2)] }),
+  species('mooshroom', 'Mooshroom', 'cow', '#b74639', { habitat: 'mushroom_fields', health: 10, height: 1.4, width: .85, milk: true, stew: true, breed: 'wheat', shear: 'mushroom', drops: [drop('raw_beef', 1, 3), drop('leather', 1, 2)] }),
   species('mule', 'Mule', 'horse', '#796451', { ...horse, longEars: true }),
   species('ocelot', 'Ocelot', 'cat', '#cfb256', { habitat: 'forest', height: .65, health: 10, speed: 2.5, trust: 'cod', breed: 'salmon', repel: 'creeper', spots: true }),
   species('panda', 'Panda', 'bear', '#e1e0d5', { habitat: 'forest', health: 20, width: 1.1, height: 1.2, temperament: 'neutral', breed: 'bamboo', drops: [drop('bamboo', 1, 2)], accent: '#343634' }),
