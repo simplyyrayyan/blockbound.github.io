@@ -287,10 +287,10 @@ export class World {
         if (id === B.STONE) {
           const vein = hash(Math.floor(x / 2), Math.floor(y / 2), Math.floor(z / 2), seed + 845);
           const fleck = hash(x, y, z, seed + 333);
-          if (vein < .035 && y < 9 && fleck < .75) id = B.DIAMOND;
-          else if (vein > .95 && y < 12 && fleck < .8) id = B.GOLD;
-          else if (vein > .12 && vein < .22 && y < 22 && fleck < .8) id = B.IRON;
-          else if (vein > .42 && vein < .54 && fleck < .8) id = B.COAL;
+          if (vein < .006 && y < 9 && fleck < .75) id = B.DIAMOND;
+          else if (vein > .994 && y < 12 && fleck < .8) id = B.GOLD;
+          else if (vein > .14 && vein < .21 && y < 22 && fleck < .8) id = B.IRON;
+          else if (vein > .44 && vein < .52 && fleck < .8) id = B.COAL;
           // Caves are dry below their roofs and never cut bedrock.
           const cave = Math.sin(x * .19 + y * .36 + seed % 31) + Math.sin(z * .21 - y * .31) + Math.sin((x + z) * .13 + y * .37);
           if (y > 2 && y < h - 3 && h > SEA + 1 && cave > 2.25) id = B.AIR;

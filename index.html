@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#323638" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet" />
     <title>Blockbound</title>
     <meta name="description" content="A playable voxel wilderness with crafting, wildlife, combat, and locally saved worlds." />
     <link rel="stylesheet" href="/styles.css" />
@@ -40,7 +42,7 @@
         <div id="target-label" class="target-label"></div><div id="mine-progress" class="mine-progress"><i></i></div>
         <div id="capture-hint" class="hidden">Click to look around · E inventory · ? controls</div><div id="effect-list" class="effect-list"></div><div id="selected-label" class="selected-label"></div>
         <div class="hud-bottom">
-          <div class="vitals"><div id="armor-icons" class="pixel-icons"></div><div class="survival-icons"><div id="heart-icons" class="pixel-icons"></div><div id="hunger-icons" class="pixel-icons"></div></div><div id="oxygen-meter" class="oxygen-meter" aria-label="Oxygen"><i></i></div></div>
+          <div class="vitals"><div class="vitals-left"><div id="armor-icons" class="pixel-icons"></div><div id="heart-icons" class="pixel-icons"></div></div><div class="vitals-right"><div id="oxygen-meter" class="oxygen-meter" aria-label="Oxygen"><i></i></div><div id="hunger-icons" class="pixel-icons"></div></div></div>
           <div class="level"><span id="mode-label">EXPLORER</span><strong id="level-value">1</strong><div class="level-bar"><i id="xp-bar"></i></div></div>
           <div id="hotbar" class="hotbar" aria-label="Hotbar"></div>
           <div class="hidden"><i id="health-bar"></i><i id="food-bar"></i><span id="health-value"></span><span id="food-value"></span></div>

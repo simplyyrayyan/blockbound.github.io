@@ -1,5 +1,5 @@
 import { B, BLOCKS, isTransparent } from './catalog.js';
-import { CHUNK } from './world.js';
+import { CHUNK, SIZE } from './world.js';
 import { blockBoxes } from './block-shapes.js';
 
 export const ATLAS_TILES = 2 ** Math.ceil(Math.log2(Math.ceil(Math.sqrt(BLOCKS.length * 3))));
@@ -17,11 +17,36 @@ export function buildChunkMesh(world, cx, cz) {
   const x0 = cx * CHUNK, z0 = cz * CHUNK, height = world.height;
   // A padded dense view turns all face-neighbor tests into cheap array reads.
   const stride = CHUNK + 2, plane = stride * stride, voxels = new Uint16Array(plane * height);
-  for (let x = -1; x <= CHUNK; x++) for (let z = -1; z <= CHUNK; z++) for (let y = 0; y < height; y++) voxels[y * plane + (z + 1) * stride + x + 1] = world.get(x0 + x, y, z0 + z);
+  // Inner columns are read straight from the backing typed arrays: routing all
+  // ~30k voxels through world.get rebuilds chunk-key strings and re-runs
+  // ensureChunk for every single one. The 1-block perimeter keeps world.get so
+  // neighbouring chunks still generate and edits still apply.
+  const inCore = cx >= 0 && cz >= 0 && cx < SIZE / CHUNK && cz < SIZE / CHUNK;
+  const SS = SIZE * SIZE;
+  const far = inCore ? null : (world.terrainChunks.get(`${cx},${cz}`) || null);
+  const edits = inCore ? world.edits : world.farEdits;
+  const hasEdits = edits.size > 0;
+  const hasStates = (inCore ? world.states : world.farStates).size > 0 || world.baseStates.size > 0;
+  for (let x = -1; x <= CHUNK; x++) for (let z = -1; z <= CHUNK; z++) {
+    const wx = x0 + x, wz = z0 + z;
+    const inner = x >= 0 && x < CHUNK && z >= 0 && z < CHUNK;
+    const colBlocks = inner ? (inCore ? world.blocks : far) : null;
+    const colBase = inCore ? wz * SIZE + wx : z * CHUNK + x;
+    const colStride = inCore ? SS : CHUNK * CHUNK;
+    for (let y = 0; y < height; y++) {
+      let id;
+      if (colBlocks) {
+        const idx = y * colStride + colBase, raw = colBlocks[idx];
+        id = hasEdits ? (inCore ? edits.get(idx) ?? raw : edits.get(`${wx},${y},${wz}`) ?? raw) : raw;
+      } else id = world.get(wx, y, wz);
+      voxels[y * plane + (z + 1) * stride + x + 1] = id;
+    }
+  }
   const at = (x, y, z) => y < 0 || y >= height ? B.AIR : voxels[y * plane + (z + 1) * stride + x + 1];
+  const EMPTY_STATE = {};
   for (let x = 0; x < CHUNK; x++) for (let z = 0; z < CHUNK; z++) for (let y = 0; y < height; y++) {
     const actual = at(x, y, z); if (!actual) continue;
-    const wx = x0 + x, wz = z0 + z, state = world.stateAt(wx, y, wz), actualDef = BLOCKS[actual];
+    const wx = x0 + x, wz = z0 + z, state = hasStates ? world.stateAt(wx, y, wz) : EMPTY_STATE, actualDef = BLOCKS[actual];
     if (actualDef.shape === 'torch') lights.push({ x: wx, y, z: wz });
     for (const id of state.waterlogged && actual !== B.WATER ? [actual, B.WATER] : [actual]) {
       const def = BLOCKS[id], fluid = id === B.WATER || id === B.LAVA;
