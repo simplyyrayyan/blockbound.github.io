@@ -109,7 +109,7 @@ export function generateChunk(world, cx, cz) {
         const vein = hash(Math.floor(x / 2), Math.floor(y / 2), Math.floor(z / 2), seed + 845), r = hash(x, y, z, seed + 333);
         id = y < 6 ? B.DEEPSLATE : r > .95 ? B.GRANITE : r > .92 ? B.ANDESITE : r > .9 ? B.DIORITE : B.STONE;
         if (r < .8) {
-          const ore = vein < .027 && y < 9 ? B.DIAMOND : vein > .965 && y < 13 ? B.GOLD : vein > .12 && vein < .22 ? B.IRON : vein > .42 && vein < .53 ? B.COAL : vein > .6 && vein < .64 ? B.COPPER_ORE : vein > .72 && vein < .74 && y < 12 ? B.REDSTONE_ORE : vein > .81 && vein < .83 ? B.LAPIS_ORE : vein > .84 && vein < .846 && /mountain|taiga/.test(biome) ? B.EMERALD_ORE : null;
+          const ore = vein < .004 && y < 9 ? B.DIAMOND : vein > .996 && y < 13 ? B.GOLD : vein > .14 && vein < .21 ? B.IRON : vein > .44 && vein < .52 ? B.COAL : vein > .61 && vein < .635 ? B.COPPER_ORE : vein > .73 && vein < .742 && y < 12 ? B.REDSTONE_ORE : vein > .82 && vein < .83 ? B.LAPIS_ORE : vein > .84 && vein < .846 && /mountain|taiga/.test(biome) ? B.EMERALD_ORE : null;
           if (ore) id = y < 6 ? B[`DEEPSLATE_${BLOCKS[ore].reference?.toUpperCase()}`] || ore : ore;
         }
         const cave = Math.sin(x * .12 + y * .32 + seed % 31) + Math.sin(z * .13 - y * .29) + Math.sin((x + z) * .08 + y * .37);

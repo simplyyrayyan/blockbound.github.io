@@ -38,10 +38,15 @@ export function makeAtlas() {
     if ([B.COAL, B.IRON, B.GOLD, B.DIAMOND].includes(id) || style === 'ore') base = '#85898a';
     if (id === B.GRASS && side > 0) base = '#916341';
     if (id === B.LOG && side !== 1) base = '#bf985e';
+    // Fill the noisy base with ImageData: ~256 fillRect calls per tile across
+    // 3000+ tiles dominates startup time in canvas2d.
+    const noiseTile = ctx.createImageData(16, 16);
     for (let px = 0; px < 16; px++) for (let py = 0; py < 16; py++) {
-      ctx.fillStyle = colorVariation(base, (hash(px, id + side, py, 333) - .5) * .19);
-      ctx.fillRect(px, py, 1, 1);
+      const n = parseInt(colorVariation(base, (hash(px, id + side, py, 333) - .5) * .19).slice(1), 16);
+      const o = (py * 16 + px) * 4;
+      noiseTile.data[o] = n >> 16; noiseTile.data[o + 1] = (n >> 8) & 255; noiseTile.data[o + 2] = n & 255; noiseTile.data[o + 3] = 255;
     }
+    ctx.putImageData(noiseTile, ox, oy);
     if (id === B.GRASS && side === 1) {
       for (let x = 0; x < 16; x++) { ctx.fillStyle = colorVariation('#80a94d', (hash(x, 0, 0) - .5) * .08); ctx.fillRect(x, 0, 1, 3 + Math.floor(hash(x, 0, 0) * 3)); }
     }
@@ -93,11 +98,14 @@ export function makeAtlas() {
     if (style === 'tnt' && side === 1) { ctx.fillStyle = '#e1dbce'; ctx.fillRect(0, 5, 16, 6); ctx.fillStyle = '#443e39'; ctx.font = 'bold 6px monospace'; ctx.fillText('TNT', 2, 10); }
     if (style === 'bookshelf') { ctx.fillStyle = '#6d553e'; ctx.fillRect(0, 1, 16, 14); for (let i = 0; i < 7; i++) { ctx.fillStyle = ['#ae5953', '#5c8783', '#b0a265'][i % 3]; ctx.fillRect(i * 2 + 1, 2 + i % 3, 1, 11 - i % 3); } }
     if (id === B.NETHER_PORTAL || id === B.END_PORTAL) {
+      const portalTile = ctx.createImageData(16, 16);
       for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
         const wave = Math.sin(Math.hypot(x - 8, y - 8) * 1.2 + Math.atan2(y - 8, x - 8) * 2), fleck = hash(x, id, y, 57);
-        ctx.fillStyle = id === B.NETHER_PORTAL ? ['#351058', '#57208a', '#8239b9', '#ae63d8'][Math.min(3, Math.floor((wave + 1) * 1.9))] : fleck > .96 ? '#abddcf' : fleck > .8 ? '#203d42' : '#080d19';
-        ctx.fillRect(x, y, 1, 1);
+        const hex = id === B.NETHER_PORTAL ? ['#351058', '#57208a', '#8239b9', '#ae63d8'][Math.min(3, Math.floor((wave + 1) * 1.9))] : fleck > .96 ? '#abddcf' : fleck > .8 ? '#203d42' : '#080d19';
+        const n = parseInt(hex.slice(1), 16), o = (y * 16 + x) * 4;
+        portalTile.data[o] = n >> 16; portalTile.data[o + 1] = (n >> 8) & 255; portalTile.data[o + 2] = n & 255; portalTile.data[o + 3] = 255;
       }
+      ctx.putImageData(portalTile, ox, oy);
     }
     ctx.restore();
   }
@@ -241,6 +249,9 @@ export class VoxelRenderer {
   }
   streamAround(player) {
     if (!this.world?.streaming || !player) return;
+    const now = performance.now();
+    if (now - (this.streamAt || 0) < 100) return;
+    this.streamAt = now;
     const radius = clamp(Math.ceil((this.options?.renderDistance || 80) / CHUNK), 3, 8), cx = Math.floor(player.x / CHUNK), cz = Math.floor(player.z / CHUNK), pending = [];
     for (let x = cx - radius; x <= cx + radius; x++) for (let z = cz - radius; z <= cz + radius; z++) {
       const key = `${x},${z}`; if (Math.hypot(x - cx, z - cz) <= radius && !this.chunks.has(key)) pending.push({ x, z, distance: Math.hypot(x - cx, z - cz) });

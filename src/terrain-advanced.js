@@ -72,7 +72,8 @@ export function advancedColumn(world, x, z) {
     if (distance < 5) biome = 'plains';
     if (biome.includes('swamp')) h = sea;
     const top = /ocean|river|beach|desert/.test(biome) ? B.SAND : biome === 'badlands' ? B.RED_SAND : /snow/.test(biome) ? B.SNOW_BLOCK : biome.includes('swamp') ? B.MUD : /peaks|mountains/.test(biome) ? B.STONE : B.GRASS;
-    result = { h, biome, top, fluid: B.WATER, level: sea, temperature, moisture, riverDistance };
+    const caveValue = noise(x / 48, z / 48, seed + 703);
+    result = { h, biome, top, fluid: B.WATER, level: sea, temperature, moisture, riverDistance, cave: caveValue < .25 ? 'deep_dark' : caveValue > .79 ? 'sulfur_caves' : 'caves' };
   }
   if (cache.size >= 16384) cache.delete(cache.keys().next().value);
   cache.set(key, result); return result;
@@ -98,15 +99,17 @@ export function netherCeiling(world, x, z) {
 // blob of ore around a point inside the cell, which reads like Minecraft's
 // veins instead of speckled stone. Bands and rates follow the real game's
 // distribution, scaled to this 128-block world.
+// Ore veins are deliberately scarce: diamonds sit only in the deepest band and
+// never show more than a single face, so finding one takes real caving.
 const OVERWORLD_VEINS = [
-  { ore: 'COAL', salt: 1601, p: .0260, r: 1.5, min: 6, max: 78, stone: true },
-  { ore: 'IRON', salt: 1609, p: .0210, r: 1.45, min: 4, max: 46, stone: true },
-  { ore: 'COPPER_ORE', salt: 1619, p: .0080, r: 1.5, min: 16, max: 52, stone: true },
-  { ore: 'GOLD', salt: 1627, p: .0060, r: 1.3, min: 2, max: 34, stone: true },
-  { ore: 'REDSTONE_ORE', salt: 1637, p: .0080, r: 1.3, min: 2, max: 18, stone: true },
-  { ore: 'LAPIS_ORE', salt: 1649, p: .0050, r: 1.2, min: 2, max: 32, stone: true },
-  { ore: 'DIAMOND', salt: 1657, p: .0060, r: 1.3, min: 2, max: 16, stone: true, hidden: true },
-  { ore: 'EMERALD_ORE', salt: 1667, p: .0044, r: .9, min: 8, max: 64, stone: true, hidden: true, biomes: ['mountains', 'stony_peaks', 'meadow', 'snowy_taiga', 'cherry_grove'] },
+  { ore: 'COAL', salt: 1601, p: .0170, r: 1.4, min: 6, max: 78, stone: true },
+  { ore: 'IRON', salt: 1609, p: .0120, r: 1.3, min: 4, max: 42, stone: true },
+  { ore: 'COPPER_ORE', salt: 1619, p: .0045, r: 1.4, min: 16, max: 48, stone: true },
+  { ore: 'GOLD', salt: 1627, p: .0035, r: 1.15, min: 2, max: 28, stone: true },
+  { ore: 'REDSTONE_ORE', salt: 1637, p: .0045, r: 1.15, min: 2, max: 15, stone: true },
+  { ore: 'LAPIS_ORE', salt: 1649, p: .0030, r: 1.1, min: 2, max: 26, stone: true },
+  { ore: 'DIAMOND', salt: 1657, p: .0026, r: 1.05, min: 2, max: 13, stone: true, hidden: true },
+  { ore: 'EMERALD_ORE', salt: 1667, p: .0028, r: .8, min: 8, max: 64, stone: true, hidden: true, biomes: ['mountains', 'stony_peaks', 'meadow', 'snowy_taiga', 'cherry_grove'] },
 ];
 const NETHER_VEINS = [
   { ore: 'NETHER_QUARTZ_ORE', salt: 1701, p: .0100, r: 1.6, min: 8, max: 118 },
@@ -170,10 +173,16 @@ export function generateAdvancedChunk(world, cx, cz) {
   const write = (x, y, z, id) => { if (x < x0 || x >= x0 + CHUNK || z < z0 || z >= z0 + CHUNK || y < 0 || y >= height || !Number.isInteger(id)) return; buffer[index(x, y, z)] = id; };
   const read = (x, y, z) => (x < x0 || x >= x0 + CHUNK || z < z0 || z >= z0 + CHUNK || y < 0 || y >= height) ? -1 : buffer[index(x, y, z)];
   // Smooth 3D noise, sampled on a 4-block lattice and interpolated: the same
-  // shape is produced no matter which chunk is generated first.
+  // shape is produced no matter which chunk is generated first. The lattice for
+  // the whole chunk is precomputed into a flat array so lookups avoid Map and
+  // string-key overhead entirely.
+  const gxLo = Math.floor(x0 / 4) - 1, gxHi = Math.floor((x0 + CHUNK - 1) / 4) + 1;
+  const gzLo = Math.floor(z0 / 4) - 1, gzHi = Math.floor((z0 + CHUNK - 1) / 4) + 1;
+  const gyLo = -1, gyHi = 36, NX = gxHi - gxLo + 1, NY = gyHi - gyLo + 1, NZ = gzHi - gzLo + 1;
   const sampler = (salt, sx, sy, sz) => {
-    const cache = new Map();
-    const at = (a, b, c) => { const key = a + ',' + b + ',' + c; let v = cache.get(key); if (v === undefined) { v = volumeNoise(a * sx, b * sy, c * sz, seed + salt); cache.set(key, v); } return v; };
+    const lattice = new Float64Array(NX * NY * NZ);
+    for (let a = 0; a < NX; a++) for (let b = 0; b < NY; b++) for (let c = 0; c < NZ; c++) lattice[(b * NZ + c) * NX + a] = volumeNoise((gxLo + a) * sx, (gyLo + b) * sy, (gzLo + c) * sz, seed + salt);
+    const at = (a, b, c) => lattice[((b - gyLo) * NZ + (c - gzLo)) * NX + (a - gxLo)];
     return (x, y, z) => {
       const gx = Math.floor(x / 4), gy = Math.floor(y / 4), gz = Math.floor(z / 4);
       const u = smooth((x % 4 + 4) % 4 / 4), v = smooth((y % 4 + 4) % 4 / 4), w = smooth((z % 4 + 4) % 4 / 4);
@@ -209,6 +218,7 @@ export function generateAdvancedChunk(world, cx, cz) {
     const density = netherMass(x, y, z) * .68 + netherDetail(x, y, z) * .32;
     return density > .42 + .125 * edge;
   };
+  const openFace = n => n === B.AIR || n === B.WATER ? 1 : 0;
   const veinBlock = (x, y, z, defs, biome) => {
     const gx = Math.floor(x / 4), gy = Math.floor(y / 4), gz = Math.floor(z / 4);
     for (const def of defs) {
@@ -321,7 +331,7 @@ export function generateAdvancedChunk(world, cx, cz) {
     for (let x = x0; x < x0 + CHUNK; x++) for (let z = z0; z < z0 + CHUNK; z++) {
       const col = advancedColumn(world, x, z), { h, biome, top } = col;
       if (core) world.heights[z * SIZE + x] = Math.max(0, h);
-      const caves = caveBiome(world, x, z);
+      const caves = col.cave || 'caves';
       const max = world.dimension === 'end' ? h : Math.max(h, col.level);
       for (let y = 0; y <= max; y++) {
         let id = B.AIR;
@@ -354,7 +364,7 @@ export function generateAdvancedChunk(world, cx, cz) {
         if (id !== B.STONE && id !== B.DEEPSLATE) continue;
         // Ore never sits in open air: a vein shows at most one exposed face, and
         // the rare deep ores stay buried in the rock.
-        const faces = [read(x + 1, y, z), read(x - 1, y, z), read(x, y + 1, z), read(x, y - 1, z), read(x, y, z + 1), read(x, y, z - 1)].filter(n => n === B.AIR || n === B.WATER).length;
+        const faces = openFace(read(x + 1, y, z)) + openFace(read(x - 1, y, z)) + openFace(read(x, y + 1, z)) + openFace(read(x, y - 1, z)) + openFace(read(x, y, z + 1)) + openFace(read(x, y, z - 1));
         const vein = veinBlock(x, y, z, OVERWORLD_VEINS, biome);
         if (!vein) continue;
         if (faces > (vein.hidden ? 1 : 2)) continue;
